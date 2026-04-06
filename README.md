@@ -465,12 +465,24 @@ pending → parsing → chunking → indexing → completed
 
 ## 🎓 Design Decisions
 
-### Why Page-Level Chunks?
+### Why Section-Based Chunking?
 
-Financial reports have natural boundaries at the page level (200-400 tokens). Sliding window chunking would:
-- Split tables across chunks
-- Fragment cross-page discussions
-- Create redundant storage
+Unlike naive page-level or sliding-window chunking, our approach:
+
+1. **Aggregate pages into semantic sections**: Use LLM-extracted TOC to group consecutive pages by topic
+   - "Financial Highlights" spans pages 2-4 → Single section
+   - Preserves cross-page tables and discussions
+
+2. **Split within sections**: If a section exceeds 512 tokens, split by paragraph boundaries
+   - Maintains semantic coherence
+   - Avoids mid-sentence breaks
+
+3. **Preserve hierarchy**: Each chunk knows its `section_path` (e.g., `["Strategic Report", "Financial Highlights"]`)
+
+This approach prevents:
+- Tables split across arbitrary page boundaries
+- Related content scattered into unrelated chunks
+- Loss of document structure in retrieval
 
 ### Why Hybrid Retrieval?
 

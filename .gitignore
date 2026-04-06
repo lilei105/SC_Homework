@@ -21,6 +21,7 @@ backend/data/uploads/*
 backend/data/qdrant_storage/*
 backend/data/tasks/*
 backend/data/ocr_cache/*
+backend/data/document_status.json
 !backend/data/uploads/.gitkeep
 !backend/data/qdrant_storage/.gitkeep
 

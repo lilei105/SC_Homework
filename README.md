@@ -5,10 +5,10 @@ A production-ready Retrieval-Augmented Generation (RAG) system designed specific
 ## 🎯 Key Features
 
 - **PDF Upload & Processing**: Upload PDF reports directly, powered by Baidu PaddleOCR-VL for accurate document parsing
-- **Hybrid Retrieval**: Combines dense semantic vectors (BGE-M3) with sparse lexical matching for precise recall
+- **Intelligent Chunking**: LLM-based TOC extraction, section tree construction, and semantic chunking
+- **Hybrid Retrieval**: Combines dense semantic vectors (BGE-M3) with sparse lexical matching
 - **Two-Stage Reranking**: ColBERT MaxSim + Cross-Encoder for financial-grade accuracy
-- **Streaming Responses**: Real-time SSE-based answer generation
-- **Citation Support**: Page-level citations in responses for traceability
+- **Streaming Responses**: Real-time SSE-based answer generation with page citations
 
 ## 🏗️ System Architecture
 
@@ -26,52 +26,338 @@ A production-ready Retrieval-Augmented Generation (RAG) system designed specific
 │                              Backend (FastAPI)                               │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────────┐ │
-│  │                        Indexing Pipeline                                 │ │
-│  │  PDF ──► Baidu OCR ──► TOC Extraction ──► Section Tree ──► Chunks     │ │
-│  │                                    (LLM)           (LLM)                 │ │
-│  │                                                                          │ │
-│  │                      ┌──────────────────────────────┐                   │ │
-│  │                      │     BGE-M3 Encoding          │                   │ │
-│  │                      │  Dense Vector + Sparse Weights│                   │ │
-│  │                      └──────────────────────────────┘                   │ │
-│  │                                 │                                        │ │
-│  │                                 ▼                                        │ │
-│  │                      ┌──────────────────────────────┐                   │ │
-│  │                      │     Qdrant Storage           │                   │ │
-│  │                      │  Named Vectors (dense/sparse)│                   │ │
-│  │                      └──────────────────────────────┘                   │ │
+│  │                     Indexing Pipeline (see below)                        │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────────┐ │
 │  │                       Retrieval Pipeline                                 │ │
-│  │                                                                          │ │
-│  │  Query ──► Query Rewrite ──► BGE-M3 Encode ──► Hybrid Search          │ │
-│  │              (LLM)              │                   │                    │ │
-│  │                                 │                   ▼                    │ │
-│  │                                 │         ┌──────────────────┐          │ │
-│  │                                 │         │  RRF Fusion      │          │ │
-│  │                                 │         │  Top 50-80 Docs  │          │ │
-│  │                                 │         └──────────────────┘          │ │
-│  │                                 │                   │                    │ │
-│  │                                 ▼                   ▼                    │ │
-│  │                          Chunk Bundling ◄──────────┘                    │ │
-│  │                        (Consecutive Pages)                               │ │
+│  │  Query ──► Rewrite ──► BGE-M3 ──► Hybrid Search ──► Chunk Bundling    │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────────┐ │
 │  │                    Reranking & Generation                                │ │
-│  │                                                                          │ │
-│  │  Candidates ──► ColBERT MaxSim ──► Cross-Encoder ──► Top-3 Context    │ │
-│  │                   (Top-10)           (Top-3)                             │ │
-│  │                                                            │             │ │
-│  │                                                            ▼             │ │
-│  │                                                   ┌──────────────────┐   │ │
-│  │                                                   │  LLM Generation  │   │ │
-│  │                                                   │  Stream via SSE  │   │ │
-│  │                                                   └──────────────────┘   │ │
+│  │  Candidates ──► ColBERT MaxSim ──► Cross-Encoder ──► LLM Generation    │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 📄 Document Processing Pipeline
+
+The core of this system is the document processing pipeline that transforms raw PDF files into structured, searchable chunks. This section explains each stage in detail.
+
+### Overview
+
+```
+PDF Upload
+    │
+    ▼
+┌─────────────────┐
+│  1. OCR Parse   │  ──► Baidu PaddleOCR-VL API
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  2. Page Extract│  ──► {page_num: text} from JSON
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  3. TOC Extract │  ──► LLM extracts table of contents
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  4. Section Tree│  ──► Build hierarchy, fill content
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  5. Chunking    │  ──► Split sections into ~512 token chunks
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  6. Embedding   │  ──► BGE-M3 Dense + Sparse vectors
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  7. Indexing    │  ──► Store to Qdrant
+└─────────────────┘
+```
+
+### Stage 1: OCR Parsing
+
+**Input**: Raw PDF file (up to 500 pages, 100MB)
+
+**Process**: 
+- Upload PDF to Baidu PaddleOCR-VL API
+- API returns two URLs:
+  - `markdown_url`: Full document as Markdown
+  - `parse_result_url`: Structured JSON with page-level data
+
+**Output**:
+```json
+{
+  "file_name": "report.pdf",
+  "pages": [
+    {
+      "page_num": 0,
+      "text": "Full text content of page 1...",
+      "layouts": [...],
+      "tables": [...],
+      "images": [...]
+    },
+    ...
+  ]
+}
+```
+
+**Why Baidu OCR?**
+- Handles complex financial tables accurately
+- Preserves document structure (headers, footers, page numbers)
+- Supports 109 languages including mixed Chinese/English documents
+
+### Stage 2: Page Extraction
+
+**Input**: OCR JSON result
+
+**Process**:
+- Extract `pages[].text` from JSON
+- Build `page_dict`: `{1: "page 1 text", 2: "page 2 text", ...}`
+- Page numbers normalized to 1-indexed
+
+**Output**:
+```python
+page_dict = {
+    1: "HSBC Holdings plc\nAnnual Report 2024\n...",
+    2: "Strategic Report\nPerformance Highlights\n...",
+    ...
+}
+```
+
+### Stage 3: TOC Extraction (LLM)
+
+**Input**: First 5 pages of document
+
+**Process**:
+- Concatenate first 5 pages of content
+- Call LLM (Qwen 3.5) with structured prompt
+- LLM identifies section titles, page numbers, and hierarchy levels
+
+**Prompt Template**:
+```
+You are a document structure extractor. Extract all sections and their page numbers.
+
+Output JSON format:
+{
+  "sections": [
+    {"title": "Strategic report", "level": 1},
+    {"title": "Performance in 2024", "page": 1, "level": 2},
+    {"title": "Highlights", "page": 2, "level": 2}
+  ]
+}
+
+Rules:
+- level 1 = Major sections (no page number)
+- level 2 = Subsections (with page number)
+- page is integer, null if uncertain
+```
+
+**Output**:
+```json
+{
+  "sections": [
+    {"title": "Strategic report", "level": 1},
+    {"title": "Performance in 2024", "page": 1, "level": 2},
+    {"title": "Highlights", "page": 2, "level": 2},
+    {"title": "Financial review", "level": 1},
+    {"title": "Financial summary", "page": 86, "level": 2}
+  ]
+}
+```
+
+### Stage 4: Section Tree Construction
+
+**Input**: 
+- TOC data (section titles and page numbers)
+- page_dict (page content)
+
+**Process**:
+1. Determine page range for each section:
+   - `page_start`: Section's TOC page number
+   - `page_end`: Next section's page - 1 (or document end)
+
+2. Extract content for each section:
+   - Concatenate all pages in range
+   - Calculate token count
+
+3. Build two-level hierarchy:
+   - Level 1 sections contain Level 2 children
+   - Each Level 2 section has full content
+
+**Output**:
+```json
+[
+  {
+    "title": "Strategic report",
+    "level": 1,
+    "page_start": 1,
+    "page_end": 41,
+    "tokens": 15000,
+    "children": [
+      {
+        "title": "Performance in 2024",
+        "level": 2,
+        "page_start": 1,
+        "page_end": 2,
+        "tokens": 2500,
+        "content": "Full text content..."
+      },
+      {
+        "title": "Highlights",
+        "level": 2,
+        "page_start": 2,
+        "page_end": 4,
+        "tokens": 3200,
+        "content": "Full text content..."
+      }
+    ]
+  }
+]
+```
+
+### Stage 5: Chunking
+
+**Input**: Section tree with content
+
+**Process**:
+
+1. **Classify section type**:
+   - `narrative`: Regular text sections
+   - `table_heavy`: Multiple tables (≥3 table markers)
+   - `kpi`: Key performance indicators
+   - `mixed_media`: Contains images/figures
+   - `risk_disclosure`: Risk-related sections
+   - `appendix`: Supplementary material
+
+2. **Split into chunks** (max 512 tokens each):
+   - If section ≤ 512 tokens: Single chunk
+   - If section > 512 tokens: Split by paragraphs
+   - Preserve complete paragraphs where possible
+
+3. **Enrich chunk metadata**:
+   - `section_path`: `["Strategic report", "Highlights"]`
+   - `page_start` / `page_end`: Source page range
+   - `chunk_type`: Section classification
+
+**Output**:
+```json
+[
+  {
+    "chunk_id": "chunk_0000",
+    "chunk_index": 0,
+    "section_path": ["Strategic report", "Performance in 2024"],
+    "page_start": 1,
+    "page_end": 2,
+    "content": "HSBC Holdings plc reported strong...",
+    "tokens": 450,
+    "chunk_type": "narrative"
+  },
+  {
+    "chunk_id": "chunk_0001",
+    "chunk_index": 1,
+    "section_path": ["Strategic report", "Highlights"],
+    "page_start": 2,
+    "page_end": 4,
+    "content": "Key financial metrics for 2024...",
+    "tokens": 512,
+    "chunk_type": "kpi"
+  }
+]
+```
+
+### Stage 6: Embedding
+
+**Input**: Chunks with content
+
+**Process**:
+1. **Metadata Augmentation**: Enhance chunk text with context
+   ```
+   [HSBC Holdings plc]
+   [FY 2024]
+   - Strategic report > Highlights
+   
+   Key financial metrics for 2024...
+   ```
+
+2. **BGE-M3 Encoding**: Single forward pass produces:
+   - Dense vector: 1024 dimensions (semantic meaning)
+   - Sparse weights: `{token: weight}` (lexical importance)
+
+**Output**:
+```python
+{
+    "dense": [0.023, -0.145, ...],  # 1024 floats
+    "sparse": {"revenue": 0.82, "2024": 0.76, ...}
+}
+```
+
+### Stage 7: Indexing to Qdrant
+
+**Input**: Chunks with embeddings
+
+**Process**:
+- Store in Qdrant with named vectors:
+  - `dense`: Cosine similarity search
+  - `sparse`: BM25-style lexical search
+- Payload includes: document_id, chunk_id, content, page info
+
+**Storage Schema**:
+```json
+{
+  "id": "chunk_0001",
+  "vector": {
+    "dense": [0.023, ...],
+    "sparse": {"revenue": 0.82, ...}
+  },
+  "payload": {
+    "document_id": "abc123",
+    "chunk_id": "chunk_0001",
+    "section_title": "Strategic report > Highlights",
+    "page_start": 2,
+    "page_end": 4,
+    "content": "Key financial metrics..."
+  }
+}
+```
+
+---
+
+## 📁 Processing Artifacts
+
+Each document creates a task directory preserving all intermediate results:
+
+```
+data/tasks/{document_id}/
+├── source.pdf          # Original uploaded file
+├── ocr_result.md       # OCR markdown output
+├── ocr_result.json     # Structured OCR result (pages, layouts, tables)
+├── toc.json            # LLM-extracted table of contents
+├── section_tree.json   # Section hierarchy with content
+├── chunks_raw.json     # Chunks before embedding
+├── document.json       # Final DocumentSchema
+└── status.json         # Processing status log
+```
+
+This enables:
+- Debugging retrieval issues
+- Re-processing without re-OCR
+- Auditing chunk boundaries
+
+---
 
 ## 🔧 Technology Stack
 
@@ -80,76 +366,12 @@ A production-ready Retrieval-Augmented Generation (RAG) system designed specific
 | **Backend** | FastAPI + Uvicorn | REST API server |
 | **Frontend** | React + TypeScript + TailwindCSS | User interface |
 | **Vector DB** | Qdrant (local file mode) | Dense + Sparse vector storage |
-| **Embedding** | BAAI/bge-m3 | Multi-modal encoding (Dense + Sparse + ColBERT) |
+| **Embedding** | BAAI/bge-m3 | Multi-modal encoding |
 | **Reranker** | BAAI/bge-reranker-v2-gemma | Cross-encoder reranking |
-| **LLM** | Alibaba Qwen 3.5 (via Dashscope API) | Query rewrite & answer generation |
+| **LLM** | Alibaba Qwen 3.5 | Query rewrite & generation |
 | **OCR** | Baidu PaddleOCR-VL | PDF document parsing |
 
-## 📁 Project Structure
-
-```
-.
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── router.py              # Route registration
-│   │   │   └── endpoints/
-│   │   │       ├── documents.py       # Document upload & management
-│   │   │       └── chat.py            # Q&A streaming endpoint
-│   │   ├── core/
-│   │   │   ├── config.py              # Environment configuration
-│   │   │   └── prompts.py             # LLM prompt templates
-│   │   ├── models/
-│   │   │   └── schemas.py             # Pydantic data models
-│   │   ├── services/
-│   │   │   ├── baidu_ocr.py           # Baidu OCR API integration
-│   │   │   ├── chunker.py             # Document chunking service
-│   │   │   ├── indexer.py             # Vector indexing pipeline
-│   │   │   ├── retriever.py           # Hybrid retrieval
-│   │   │   ├── reranker.py            # Two-stage reranking
-│   │   │   ├── generator.py           # Answer generation
-│   │   │   └── llm_client.py         # LLM API client
-│   │   ├── utils/
-│   │   │   └── qdrant_client.py      # Qdrant singleton
-│   │   └── main.py                    # FastAPI entry point
-│   ├── data/
-│   │   ├── tasks/{document_id}/       # Per-document processing artifacts
-│   │   │   ├── source.pdf             # Original uploaded PDF
-│   │   │   ├── ocr_result.md         # OCR markdown output
-│   │   │   ├── ocr_result.json       # OCR structured result (with pages)
-│   │   │   ├── toc.json               # Extracted table of contents
-│   │   │   ├── section_tree.json      # Built section hierarchy
-│   │   │   ├── chunks_raw.json        # Raw chunks before indexing
-│   │   │   ├── document.json          # Final DocumentSchema
-│   │   │   └── status.json            # Processing status log
-│   │   ├── qdrant_storage/            # Vector database
-│   │   └── document_status.json       # Global document registry
-│   └── requirements.txt
-│
-├── frontend/
-│   └── src/
-│       ├── components/
-│       │   ├── Chat/
-│       │   │   ├── ChatBox.tsx        # Main chat interface
-│       │   │   ├── Message.tsx        # Message with citations
-│       │   │   └── InputArea.tsx      # Query input
-│       │   ├── Document/
-│       │   │   ├── UploadModal.tsx    # PDF/JSON upload
-│       │   │   └── DocList.tsx        # Document sidebar
-│       │   └── Layout/
-│       │       ├── Sidebar.tsx        # Navigation & status polling
-│       │       └── Header.tsx         # Top bar
-│       ├── hooks/
-│       │   └── useChat.ts             # SSE streaming hook
-│       ├── services/
-│       │   └── api.ts                 # API client
-│       └── types/
-│           └── index.ts               # TypeScript interfaces
-│
-├── prd.md                             # Product requirements (Chinese)
-├── coding_spec.md                     # Technical specifications
-└── financial_report_rag_schema.jsonc  # Document schema definition
-```
+---
 
 ## 🚀 Quick Start
 
@@ -157,117 +379,73 @@ A production-ready Retrieval-Augmented Generation (RAG) system designed specific
 
 - Python 3.11+
 - Node.js 18+
-- CUDA-capable GPU (recommended for local embedding)
+- CUDA-capable GPU (recommended)
 
-### 1. Backend Setup
+### Backend Setup
 
 ```bash
 cd backend
-
-# Create virtual environment
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
 # Edit .env with your API keys
+
+uvicorn app.main:app --reload
 ```
 
-### 2. Frontend Setup
+### Frontend Setup
 
 ```bash
 cd frontend
-
-# Install dependencies
 npm install
-```
-
-### 3. Run the Application
-
-```bash
-# Terminal 1: Backend
-cd backend
-uvicorn app.main:app --reload --host 0.0.0.0
-
-# Terminal 2: Frontend
-cd frontend
 npm run dev
 ```
 
-Access the application at `http://localhost:5173`
+Access at `http://localhost:5173`
+
+---
 
 ## ⚙️ Configuration
 
-Create `backend/.env` with the following:
-
 ```env
-# Alibaba Dashscope API (for LLM)
-DASHSCOPE_API_KEY=your_api_key
+# backend/.env
+
+# LLM API (Alibaba Dashscope)
+DASHSCOPE_API_KEY=your_key
 DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 DASHSCOPE_MODEL=qwen3.5-flash
 
 # Baidu OCR API
-BAIDU_OCR_API_KEY=your_api_key
-BAIDU_OCR_SECRET_KEY=your_secret_key
+BAIDU_OCR_API_KEY=your_key
+BAIDU_OCR_SECRET_KEY=your_secret
 
-# Qdrant
+# Storage
 QDRANT_PATH=./data/qdrant_storage
 COLLECTION_NAME=financial_reports
 
 # Models
 EMBEDDING_MODEL_NAME=BAAI/bge-m3
 RERANKER_MODEL_NAME=BAAI/bge-reranker-v2-gemma
-LLM_MODEL=qwen3.5-flash
-
-# Server
-HOST=0.0.0.0
-PORT=8000
-DEBUG=True
 ```
+
+---
 
 ## 📡 API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/v1/documents` | Upload PDF or JSON document |
+| `POST` | `/api/v1/documents` | Upload PDF or JSON |
 | `GET` | `/api/v1/documents` | List all documents |
-| `GET` | `/api/v1/documents/{id}` | Get document details |
 | `GET` | `/api/v1/documents/{id}/status` | Get processing status |
 | `DELETE` | `/api/v1/documents/{id}` | Delete document |
-| `POST` | `/api/v1/chat` | Q&A streaming (SSE) |
+| `POST` | `/api/v1/chat` | Q&A (SSE streaming) |
 
-### Upload Document
+---
 
-```bash
-# Upload PDF
-curl -X POST "http://localhost:8000/api/v1/documents" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@report.pdf"
-
-# Upload JSON (pre-processed)
-curl -X POST "http://localhost:8000/api/v1/documents" \
-  -H "Content-Type: multipart/form-data" \
-  -F "file=@document.json"
-```
-
-### Chat Query (SSE)
-
-```javascript
-const eventSource = new EventSource(
-  '/api/v1/chat?document_id=xxx&query=What is the revenue in 2024?'
-);
-
-eventSource.onmessage = (event) => {
-  console.log(event.data); // Streaming response
-};
-```
-
-## 📊 Processing Pipeline
-
-### Document Status Flow
+## 📊 Document Status Flow
 
 ```
 pending → parsing → chunking → indexing → completed
@@ -275,65 +453,39 @@ pending → parsing → chunking → indexing → completed
                                              failed
 ```
 
-| Status | Description |
-|--------|-------------|
-| `pending` | Uploaded, waiting to process |
-| `parsing` | OCR recognition in progress |
-| `chunking` | Building section tree and splitting |
-| `indexing` | Embedding and storing vectors |
+| Status | Stage |
+|--------|-------|
+| `pending` | Uploaded, waiting |
+| `parsing` | OCR in progress |
+| `chunking` | TOC extraction, section building, splitting |
+| `indexing` | Embedding and Qdrant storage |
 | `completed` | Ready for Q&A |
-| `failed` | Processing error |
 
-### Processing Artifacts
+---
 
-Each uploaded document creates a task directory with all intermediate results:
+## 🎓 Design Decisions
 
-```
-data/tasks/{document_id}/
-├── source.pdf          # Original file
-├── ocr_result.md       # OCR markdown (for debugging)
-├── ocr_result.json     # Structured OCR result with page info
-├── toc.json            # LLM-extracted table of contents
-├── section_tree.json   # Section hierarchy with content
-├── chunks_raw.json     # Chunks before embedding
-├── document.json       # Final DocumentSchema
-└── status.json         # Processing log
-```
+### Why Page-Level Chunks?
 
-## 🎓 Design Principles
+Financial reports have natural boundaries at the page level (200-400 tokens). Sliding window chunking would:
+- Split tables across chunks
+- Fragment cross-page discussions
+- Create redundant storage
 
-### Why Not Sliding Window Chunking?
+### Why Hybrid Retrieval?
 
-Financial reports have natural semantic boundaries at the page level (200-400 tokens average). Unlike general documents, sliding window chunking would:
-
-- Split tables across chunks, breaking numerical context
-- Fragment cross-page financial discussions
-- Create redundant storage without improving retrieval
-
-### Why Store Both Dense and Sparse Vectors?
-
-Financial queries have dual requirements:
-
-1. **Semantic understanding**: "profit margin" ≈ "net income ratio"
-2. **Exact term matching**: "$12.3 billion", "EBITDA", "Q3 2024"
-
-BGE-M3 provides both in a single forward pass, and Qdrant's RRF fusion combines them optimally.
+Financial queries need both:
+- **Semantic matching**: "profit" ≈ "net income"
+- **Exact matching**: "$12.3 billion", "Q3 2024", "EBITDA"
 
 ### Why Two-Stage Reranking?
 
-| Stage | Method | Input | Output | Latency |
-|-------|--------|-------|--------|---------|
-| 1 | ColBERT MaxSim | 50-80 candidates | Top-10 | ~100ms |
-| 2 | Cross-Encoder | Top-10 | Top-3 | ~200ms |
+| Stage | Input → Output | Purpose |
+|-------|---------------|---------|
+| ColBERT MaxSim | 50-80 → 10 | Token-level fine matching |
+| Cross-Encoder | 10 → 3 | Deep semantic scoring |
 
-ColBERT's late interaction captures fine-grained token matching, while Cross-Encoder provides deep semantic scoring. This combination achieves financial-grade precision.
-
-## 📚 References
-
-This system design is informed by:
-
-1. **FinSage** - A Financial RAG System with Multi-Source Data and Multi-Stage Retrieval
-2. **VeritasFi** - Financial RAG with Domain-Specific Chunking and Reranking
+---
 
 ## 📄 License
 

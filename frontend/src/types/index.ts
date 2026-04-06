@@ -63,10 +63,15 @@ export interface Document {
 
 export interface DocumentStatus {
   document_id: string
-  status: 'pending' | 'indexing' | 'completed' | 'failed'
+  status: 'pending' | 'parsing' | 'chunking' | 'indexing' | 'completed' | 'failed'
+  file_type?: 'pdf' | 'json'
   total_chunks: number
   indexed_chunks: number
   error?: string
+  processing_stage?: string
+  source_file?: string
+  created_at?: string
+  updated_at?: string
 }
 
 export interface ChatMessage {

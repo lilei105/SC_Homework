@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { documentApi } from '../../services/api'
 import type { Document, DocumentStatus } from '../../types'
 import UploadModal from '../Document/UploadModal'
@@ -9,53 +9,79 @@ interface SidebarProps {
   onSelectDoc: (docId: string) => void
 }
 
+// 非终态：需要继续轮询
+const isProcessing = (status: string) =>
+  ['pending', 'parsing', 'chunking', 'indexing'].includes(status)
+
 export default function Sidebar({ currentDocId, onSelectDoc }: SidebarProps) {
   const [documents, setDocuments] = useState<Document[]>([])
   const [statuses, setStatuses] = useState<Record<string, DocumentStatus>>({})
   const [showUpload, setShowUpload] = useState(false)
   const [loading, setLoading] = useState(false)
 
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
     setLoading(true)
     try {
       const docs = await documentApi.list()
       setDocuments(docs)
+      // 同时获取所有文档的状态
+      const statusMap: Record<string, DocumentStatus> = {}
+      for (const doc of docs) {
+        try {
+          const status = await documentApi.getStatus(doc.document_id)
+          statusMap[doc.document_id] = status
+        } catch {
+          // ignore
+        }
+      }
+      setStatuses(statusMap)
     } catch (e) {
       console.error('Failed to fetch documents:', e)
     } finally {
       setLoading(false)
     }
-  }
-
-  useEffect(() => {
-    fetchDocuments()
   }, [])
 
   useEffect(() => {
-    // Poll status for indexing documents
-    const indexingDocs = Object.values(statuses).filter(
-      (s) => s.status === 'indexing'
+    fetchDocuments()
+  }, [fetchDocuments])
+
+  // 轮询处理中的文档
+  useEffect(() => {
+    const processingDocs = Object.values(statuses).filter(
+      (s) => isProcessing(s.status)
     )
-    if (indexingDocs.length > 0) {
-      const interval = setInterval(() => {
-        indexingDocs.forEach(async (doc) => {
-          try {
-            const status = await documentApi.getStatus(doc.document_id)
-            setStatuses((prev) => ({ ...prev, [doc.document_id]: status }))
-          } catch (e) {
-            console.error('Failed to poll status:', e)
+
+    if (processingDocs.length === 0) return
+
+    const interval = setInterval(async () => {
+      for (const doc of processingDocs) {
+        try {
+          const status = await documentApi.getStatus(doc.document_id)
+          setStatuses((prev) => ({ ...prev, [doc.document_id]: status }))
+
+          // 如果处理完成，刷新文档列表
+          if (status.status === 'completed') {
+            fetchDocuments()
           }
-        })
-      }, 2000)
-      return () => clearInterval(interval)
-    }
-  }, [statuses])
+        } catch (e) {
+          console.error('Failed to poll status:', e)
+        }
+      }
+    }, 2000)
+
+    return () => clearInterval(interval)
+  }, [statuses, fetchDocuments])
 
   const handleUpload = async (file: File) => {
     try {
       const status = await documentApi.upload(file)
-      await fetchDocuments()
+
+      // 立即添加到状态列表，开始轮询
       setStatuses((prev) => ({ ...prev, [status.document_id]: status }))
+
+      // 刷新文档列表
+      await fetchDocuments()
     } catch (e) {
       console.error('Upload failed:', e)
       alert('上传失败，请检查文件格式')

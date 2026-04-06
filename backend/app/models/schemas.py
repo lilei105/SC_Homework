@@ -121,10 +121,14 @@ class DocumentSchema(BaseModel):
 
 class DocumentStatus(BaseModel):
     document_id: str
-    status: Literal["pending", "indexing", "completed", "failed"]
+    status: Literal["pending", "parsing", "chunking", "indexing", "completed", "failed"]
+    file_type: Literal["pdf", "json"] = "json"
     total_chunks: int = 0
     indexed_chunks: int = 0
     error: Optional[str] = None
+    processing_stage: Optional[str] = None  # 详细阶段描述
+    ocr_task_id: Optional[str] = None  # 百度 OCR 任务 ID
+    source_file: Optional[str] = None  # 原始文件名
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 

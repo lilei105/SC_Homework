@@ -9,3 +9,5 @@ python-multipart>=0.0.6
 sse-starlette>=1.8.0
 torch>=2.0.0
 transformers>=4.35.0
+httpx>=0.25.0
+openai>=1.0.0

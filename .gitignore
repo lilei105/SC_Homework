@@ -16,9 +16,11 @@ build/
 .env
 *.env.local
 
-# Data directories (user uploaded files, vector storage)
+# Data directories (user uploaded files, vector storage, tasks)
 backend/data/uploads/*
 backend/data/qdrant_storage/*
+backend/data/tasks/*
+backend/data/ocr_cache/*
 !backend/data/uploads/.gitkeep
 !backend/data/qdrant_storage/.gitkeep
 

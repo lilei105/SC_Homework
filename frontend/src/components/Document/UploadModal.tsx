@@ -19,13 +19,22 @@ export default function UploadModal({ onClose, onUpload }: UploadModalProps) {
   const validateAndSetFile = (selectedFile: File | undefined) => {
     if (!selectedFile) return
 
-    if (!selectedFile.name.endsWith('.json')) {
-      setError('请上传 JSON 格式文件')
-      return
-    }
+    const ext = selectedFile.name.split('.').pop()?.toLowerCase()
 
-    setFile(selectedFile)
-    setError(null)
+    if (ext === 'pdf') {
+      // PDF 验证：大小 (100MB)
+      if (selectedFile.size > 100 * 1024 * 1024) {
+        setError('PDF 文件不能超过 100MB')
+        return
+      }
+      setFile(selectedFile)
+      setError(null)
+    } else if (ext === 'json') {
+      setFile(selectedFile)
+      setError(null)
+    } else {
+      setError('请上传 PDF 或 JSON 格式文件')
+    }
   }
 
   const handleDrop = (e: React.DragEvent) => {
@@ -50,6 +59,8 @@ export default function UploadModal({ onClose, onUpload }: UploadModalProps) {
     }
   }
 
+  const isPdf = file?.name.endsWith('.pdf')
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-xl p-6 w-[480px] shadow-2xl">
@@ -71,7 +82,7 @@ export default function UploadModal({ onClose, onUpload }: UploadModalProps) {
           <input
             ref={inputRef}
             type="file"
-            accept=".json"
+            accept=".pdf,.json"
             onChange={handleFileChange}
             className="hidden"
           />
@@ -81,13 +92,15 @@ export default function UploadModal({ onClose, onUpload }: UploadModalProps) {
               <p className="text-gray-700 font-medium">{file.name}</p>
               <p className="text-gray-500 text-sm mt-1">
                 {(file.size / 1024).toFixed(1)} KB
+                {isPdf && ' · PDF 将自动 OCR 识别'}
               </p>
             </div>
           ) : (
             <div>
               <div className="text-gray-400 text-4xl mb-2">📄</div>
               <p className="text-gray-600">点击或拖拽文件到此处</p>
-              <p className="text-gray-400 text-sm mt-1">支持 JSON 格式</p>
+              <p className="text-gray-400 text-sm mt-1">支持 PDF 和 JSON 格式</p>
+              <p className="text-gray-400 text-xs mt-1">PDF 最大 500 页，100MB</p>
             </div>
           )}
         </div>
@@ -108,7 +121,7 @@ export default function UploadModal({ onClose, onUpload }: UploadModalProps) {
             disabled={!file}
             className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            上传并索引
+            {isPdf ? '上传并处理' : '上传并索引'}
           </button>
         </div>
       </div>

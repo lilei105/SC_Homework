@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Environment variables (contains API keys)
+.env
+*.env.local
+
+# Data directories (user uploaded files, vector storage)
+backend/data/uploads/*
+backend/data/qdrant_storage/*
+!backend/data/uploads/.gitkeep
+!backend/data/qdrant_storage/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node.js
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Logs
+*.log
+logs/
+
+# Cache
+.cache/
+.pytest_cache/
+.mypy_cache/
+
+# Sample data and processing files
+pdf_sample/

@@ -1,0 +1,306 @@
+{
+  // ============================================================================
+  // Financial Report RAG Intermediate Schema
+  // ----------------------------------------------------------------------------
+  // 用途：
+  // 1. 接收 OCR / 版面分析 / 表格抽取之后的“已清洗结果”
+  // 2. 作为后续 chunking / embedding / BM25 / rerank / QA / summary 的统一输入
+  // 3. 不要求包含 embedding、rerank score、OCR bbox 全量细节
+  //
+  // 设计原则：
+  // - 文档级、章节级、chunk级信息分层保存
+  // - table / figure 不只保留原始结构，还要提供可检索文本 content
+  // - 保留 page / source_trace / relations，方便 citation 与 bundling
+  // - 支持后续扩展 metrics extraction / summary generation
+  // ============================================================================
+
+  "schema_version": "1.0",
+
+  // ============================================================================
+  // 文档级元数据
+  // ============================================================================
+  "document": {
+    // 系统内唯一 ID
+    "document_id": "nvidia_fy2024_10k",
+
+    // 原始 PDF 文件名
+    "source_file": "NVIDIA_2024_10K.pdf",
+
+    // 公司名
+    "company_name": "NVIDIA Corporation",
+
+    // 可选：股票代码
+    "ticker": "NVDA",
+
+    // 报告类型：10k / 10q / annual_report / quarterly_report / earnings_release / shareholder_letter / other
+    "report_type": "10k",
+
+    // 人类可读标题
+    "report_title": "NVIDIA Corporation Form 10-K Annual Report for Fiscal Year 2024",
+
+    // 文档语言
+    "language": "en",
+
+    // 主货币
+    "currency": "USD",
+
+    // 财年与期间
+    "fiscal_year": 2024,
+    "fiscal_period": "FY",
+
+    // 报告发布日期（如果有）
+    "report_date": "2024-02-21",
+
+    // 总页数（可选）
+    "page_count": 95,
+
+    // OCR / 解析来源说明
+    "parser": {
+      "provider": "manual_structuring",
+      "version": null,
+      "notes": "OCR and cleaning performed externally; this JSONC is prepared for downstream RAG ingestion."
+    }
+  },
+
+  // ============================================================================
+  // 章节级信息
+  // ----------------------------------------------------------------------------
+  // 作用：
+  // - 给 chunk 提供 section_title / section_summary
+  // - 支持 metadata-aware retrieval
+  // - 支持 summary 时按章节聚合
+  // ============================================================================
+  "sections": [
+    {
+      "section_id": "sec_001",
+      "title": "Item 1A. Risk Factors",
+      "normalized_title": "Risk Factors",
+      "summary": "This section covers supply chain concentration, export control risk, competition, cybersecurity, and intellectual property risks.",
+      "page_start": 15,
+      "page_end": 19
+    },
+    {
+      "section_id": "sec_002",
+      "title": "Item 7. Management's Discussion and Analysis of Financial Condition and Results of Operations",
+      "normalized_title": "MD&A",
+      "summary": "This section discusses revenue drivers, gross margin trends, operating expenses, liquidity, and capital resources.",
+      "page_start": 20,
+      "page_end": 35
+    }
+  ],
+
+  // ============================================================================
+  // Chunk 级知识单元
+  // ----------------------------------------------------------------------------
+  // 每个 chunk 必须已经过：
+  // - OCR / 文本清洗
+  // - 必要的断行修复
+  // - 表格文本化 / 图表说明文本化
+  //
+  // chunk_type 允许值：text / table / figure / mixed
+  // ============================================================================
+  "chunks": [
+    {
+      // ------------------------------------------------------------------------
+      // 基本身份信息
+      // ------------------------------------------------------------------------
+      "chunk_id": "c0001",
+      "chunk_index": 1,
+
+      // 所属章节
+      "section_id": "sec_002",
+      "section_title": "Item 7. Management's Discussion and Analysis of Financial Condition and Results of Operations",
+      "section_summary": "This section discusses revenue drivers, gross margin trends, operating expenses, liquidity, and capital resources.",
+
+      // 来源页码范围
+      "page_start": 25,
+      "page_end": 25,
+
+      // ------------------------------------------------------------------------
+      // Chunk 类型
+      // ------------------------------------------------------------------------
+      "chunk_type": "table",
+
+      // ------------------------------------------------------------------------
+      // 主检索文本（RAG 真正要用的文本）
+      // ------------------------------------------------------------------------
+      // 要求：
+      // - 对 text：放清洗后的正文
+      // - 对 table：放“可问答”的自然语言或键值文本，不要只放原始 markdown 表
+      // - 对 figure：放图标题 + 图注 + 必要描述
+      "content": "In FY2024, NVIDIA reported Data Center revenue of 47.5 billion USD, Gaming revenue of 10.4 billion USD, Professional Visualization revenue of 1.6 billion USD, and Automotive revenue of 1.1 billion USD.",
+
+      // 可选：简短摘要，用于检索结果展示 / 轻量预筛选
+      "content_brief": "Revenue breakdown by market platform for FY2024.",
+
+      // 可选：稀疏检索 / metadata boost 用关键词
+      "keywords": [
+        "revenue",
+        "Data Center",
+        "Gaming",
+        "Professional Visualization",
+        "Automotive",
+        "FY2024"
+      ],
+
+      // ------------------------------------------------------------------------
+      // 时间 / 期间信息
+      // ------------------------------------------------------------------------
+      // 财报问答里 period 非常重要，建议显式结构化
+      "period": {
+        "fiscal_year": 2024,
+        "fiscal_period": "FY",
+        "date_label": "FY2024",
+        "start_date": null,
+        "end_date": null
+      },
+
+      // ------------------------------------------------------------------------
+      // 实体信息（可选）
+      // ------------------------------------------------------------------------
+      "entities": {
+        "company": ["NVIDIA Corporation"],
+        "products": [],
+        "regions": [],
+        "people": []
+      },
+
+      // ------------------------------------------------------------------------
+      // 原始结构化表格（可选，但强烈推荐）
+      // ------------------------------------------------------------------------
+      // 用途：
+      // - 指标抽取
+      // - 数值校验
+      // - 后续生成 executive summary 时更稳
+      "table_data": {
+        "table_title": "Revenue by Market Platform",
+        "unit": "millions USD",
+        "headers": ["Platform", "FY2022", "FY2023", "FY2024"],
+        "rows": [
+          ["Data Center", "15005", "26974", "47525"],
+          ["Gaming", "12537", "10711", "10447"],
+          ["Professional Visualization", "2122", "1540", "1555"],
+          ["Automotive", "566", "625", "1091"]
+        ]
+      },
+
+      // figure chunk 时使用；非 figure 则填 null
+      "figure_data": null,
+
+      // ------------------------------------------------------------------------
+      // 可选：轻量 financial metrics
+      // ------------------------------------------------------------------------
+      // 不要求非常全；只放后续 API 真的会用到的关键值
+      "financial_metrics": [
+        {
+          "name": "Data Center revenue",
+          "value": "47.5 billion USD",
+          "normalized_value": 47525000000,
+          "unit": "USD",
+          "period_label": "FY2024"
+        },
+        {
+          "name": "Gaming revenue",
+          "value": "10.4 billion USD",
+          "normalized_value": 10447000000,
+          "unit": "USD",
+          "period_label": "FY2024"
+        }
+      ],
+
+      // ------------------------------------------------------------------------
+      // 来源追踪
+      // ------------------------------------------------------------------------
+      // 用途：citation / debug / 回溯 OCR 原文
+      "source_trace": {
+        "source_block_ids": ["p25_b10", "p25_b11"],
+        "raw_text_excerpt": "Table 2: Revenue by Market Platform ...",
+        "ocr_confidence": null
+      },
+
+      // ------------------------------------------------------------------------
+      // 邻接关系
+      // ------------------------------------------------------------------------
+      // 用于后续 chunk bundling / expansion
+      "relations": {
+        "prev_chunk_id": "c0000",
+        "next_chunk_id": "c0002"
+      },
+
+      // ------------------------------------------------------------------------
+      // 可选：显式分组 ID
+      // ------------------------------------------------------------------------
+      // 适合：
+      // - 跨页表格
+      // - 图 + 图注
+      // - 标题块 + 数据块
+      "bundle_id": "table_revenue_platform",
+
+      // ------------------------------------------------------------------------
+      // 可选：标记位
+      // ------------------------------------------------------------------------
+      "flags": {
+        "is_section_lead": false,
+        "is_table_title": false,
+        "is_table_continuation": false,
+        "is_figure_caption": false,
+        "is_key_financial_chunk": true
+      }
+    },
+
+    {
+      "chunk_id": "c0002",
+      "chunk_index": 2,
+      "section_id": "sec_002",
+      "section_title": "Item 7. Management's Discussion and Analysis of Financial Condition and Results of Operations",
+      "section_summary": "This section discusses revenue drivers, gross margin trends, operating expenses, liquidity, and capital resources.",
+      "page_start": 26,
+      "page_end": 26,
+      "chunk_type": "text",
+      "content": "The increase in overall gross margin from 56.9% to 72.7% was primarily attributable to favorable product mix shift toward higher-margin Data Center products, improved manufacturing yields, and pricing discipline in the enterprise AI market.",
+      "content_brief": "Explains main drivers of gross margin expansion in FY2024.",
+      "keywords": ["gross margin", "product mix", "Data Center", "manufacturing yields", "pricing"],
+      "period": {
+        "fiscal_year": 2024,
+        "fiscal_period": "FY",
+        "date_label": "FY2024",
+        "start_date": null,
+        "end_date": null
+      },
+      "entities": {
+        "company": ["NVIDIA Corporation"],
+        "products": ["Data Center products"],
+        "regions": [],
+        "people": []
+      },
+      "table_data": null,
+      "figure_data": null,
+      "financial_metrics": [
+        {
+          "name": "Gross Margin",
+          "value": "72.7%",
+          "normalized_value": 72.7,
+          "unit": "%",
+          "period_label": "FY2024"
+        }
+      ],
+      "source_trace": {
+        "source_block_ids": ["p26_b03", "p26_b04"],
+        "raw_text_excerpt": "The increase in overall gross margin ...",
+        "ocr_confidence": null
+      },
+      "relations": {
+        "prev_chunk_id": "c0001",
+        "next_chunk_id": null
+      },
+      "bundle_id": null,
+      "flags": {
+        "is_section_lead": false,
+        "is_table_title": false,
+        "is_table_continuation": false,
+        "is_figure_caption": false,
+        "is_key_financial_chunk": true
+      }
+    }
+  ]
+}

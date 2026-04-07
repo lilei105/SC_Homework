@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from app.models.schemas import DocumentStatus, DocumentSchema
 from app.services.indexer import index_document
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import json
 import os
 import logging
@@ -227,41 +227,70 @@ def delete_document(document_id: str) -> bool:
         return False
 
 
-async def process_pdf_document(document_id: str, file_path: Path):
+def _extract_from_paddleocr_json(ocr_json: list) -> tuple[str, dict]:
     """
-    Background task: Process PDF document.
+    从 PaddleOCR-VL JSON 中提取 markdown 内容和页面字典
 
-    Flow: OCR -> Chunk -> Index
+    Args:
+        ocr_json: PaddleOCR-VL 返回的 JSON 列表
 
-    All files are saved to: data/tasks/{document_id}/
+    Returns:
+        (markdown_content, page_dict)
     """
-    # Create task directory
-    task_dir = _get_task_dir(document_id)
+    markdown_parts = []
+    page_dict = {}
 
+    for i, page_data in enumerate(ocr_json):
+        page_num = i + 1
+        pruned = page_data.get("prunedResult", {})
+
+        # 优先使用 markdown 字段
+        page_markdown = pruned.get("markdown", "")
+
+        if not page_markdown:
+            # 如果没有 markdown，从 parsing_res_list 构建
+            blocks = pruned.get("parsing_res_list", [])
+            block_contents = []
+            for block in blocks:
+                content = block.get("block_content", "")
+                if content:
+                    block_contents.append(content)
+            page_markdown = "\n\n".join(block_contents)
+
+        if page_markdown.strip():
+            markdown_parts.append(f"<!-- PAGE: {page_num} -->\n{page_markdown.strip()}")
+            page_dict[page_num] = page_markdown.strip()
+
+    return "\n\n".join(markdown_parts), page_dict
+
+
+def _is_paddleocr_format(data: Any) -> bool:
+    """检测是否为 PaddleOCR-VL 格式的 JSON"""
+    if not isinstance(data, list):
+        return False
+    if len(data) == 0:
+        return False
+    first = data[0]
+    if not isinstance(first, dict):
+        return False
+    # PaddleOCR-VL 格式特征：有 prunedResult 字段
+    return "prunedResult" in first or "parsing_res_list" in first
+
+
+async def _process_and_index_document(
+    document_id: str,
+    markdown_content: str,
+    ocr_json_result: dict,
+    source_file: str,
+    task_dir: Path
+):
+    """
+    核心处理逻辑：Chunk -> Index
+
+    PDF 和 PaddleOCR JSON 共享此流程
+    """
     try:
-        logger.info(f"Processing PDF document: {document_id}")
-
-        # Update status: parsing
-        _update_status(document_id, "parsing", "OCR 识别中...")
-
-        # 1. OCR processing
-        from app.services.baidu_ocr import get_ocr_service
-        ocr_service = get_ocr_service()
-
-        markdown_content, ocr_json_result = await ocr_service.process_pdf(file_path)
-
-        # Save OCR markdown
-        ocr_md_path = task_dir / "ocr_result.md"
-        ocr_md_path.write_text(markdown_content, encoding="utf-8")
-        logger.info(f"Saved OCR markdown to: {ocr_md_path}")
-
-        # Save OCR JSON (original result with page info)
-        ocr_json_path = task_dir / "ocr_result.json"
-        ocr_json_path.write_text(
-            json.dumps(ocr_json_result, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
-        logger.info(f"Saved OCR JSON to: {ocr_json_path}")
+        logger.info(f"[PROCESS] Starting chunk+index for {document_id}")
 
         # Update status: chunking
         _update_status(document_id, "chunking", "文档切分中...")
@@ -275,7 +304,7 @@ async def process_pdf_document(document_id: str, file_path: Path):
             markdown_content,
             {
                 "document_id": document_id,
-                "source_file": metadata.get("source_file", file_path.name),
+                "source_file": source_file,
                 "company_name": metadata.get("company_name", "Unknown"),
                 "report_type": metadata.get("report_type", "annual_report"),
                 "report_title": metadata.get("report_title", ""),
@@ -285,7 +314,7 @@ async def process_pdf_document(document_id: str, file_path: Path):
                 "fiscal_period": metadata.get("fiscal_period", "FY"),
             },
             ocr_json_result=ocr_json_result,
-            save_intermediate=task_dir  # 保存中间结果到任务目录
+            save_intermediate=task_dir
         )
 
         # Save final document schema
@@ -309,12 +338,12 @@ async def process_pdf_document(document_id: str, file_path: Path):
             "task_dir": str(task_dir.relative_to(DATA_PATH)),
         })
 
-        # Save task status to task directory
+        # Save task status
         task_status_path = task_dir / "status.json"
         task_status = {
             "document_id": document_id,
             "status": "indexing",
-            "source_file": metadata.get("source_file"),
+            "source_file": source_file,
             "chunks": len(doc_schema.chunks),
             "pages": doc_schema.document.page_count,
             "updated_at": datetime.now().isoformat(),
@@ -344,31 +373,196 @@ async def process_pdf_document(document_id: str, file_path: Path):
         )
 
         # Update task status file
-        task_status_path = task_dir / "status.json"
-        task_status = {
-            "document_id": document_id,
-            "status": "completed",
-            "source_file": metadata.get("source_file"),
-            "chunks": len(doc_schema.chunks),
-            "pages": doc_schema.document.page_count,
-            "updated_at": datetime.now().isoformat(),
-        }
+        task_status["status"] = "completed"
+        task_status["updated_at"] = datetime.now().isoformat()
         task_status_path.write_text(
             json.dumps(task_status, ensure_ascii=False, indent=2),
             encoding="utf-8"
         )
 
-        logger.info(f"Successfully processed PDF document: {document_id}")
+        logger.info(f"Successfully processed document: {document_id}")
+
+    except Exception as e:
+        logger.error(f"Failed to process document {document_id}: {e}", exc_info=True)
+        _update_status(document_id, "failed", None, str(e))
+
+
+async def process_pdf_document(document_id: str, file_path: Path):
+    """
+    Background task: Process PDF document.
+
+    Flow: OCR -> Chunk -> Index
+    """
+    task_dir = _get_task_dir(document_id)
+
+    try:
+        logger.info(f"Processing PDF document: {document_id}")
+
+        # Update status: parsing
+        _update_status(document_id, "parsing", "OCR 识别中...")
+
+        # 1. OCR processing
+        from app.services.baidu_ocr import get_ocr_service
+        ocr_service = get_ocr_service()
+
+        markdown_content, ocr_json_result = await ocr_service.process_pdf(file_path)
+
+        # Save OCR results
+        ocr_md_path = task_dir / "ocr_result.md"
+        ocr_md_path.write_text(markdown_content, encoding="utf-8")
+
+        ocr_json_path = task_dir / "ocr_result.json"
+        ocr_json_path.write_text(
+            json.dumps(ocr_json_result, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+        logger.info(f"Saved OCR results to: {task_dir}")
+
+        # 2. Chunk & Index (共享逻辑)
+        await _process_and_index_document(
+            document_id=document_id,
+            markdown_content=markdown_content,
+            ocr_json_result=ocr_json_result,
+            source_file=file_path.name,
+            task_dir=task_dir
+        )
 
     except Exception as e:
         logger.error(f"Failed to process PDF {document_id}: {e}", exc_info=True)
         _update_status(document_id, "failed", None, str(e))
 
 
+def _run_sync_processing(document_id: str, ocr_json: list, source_file: str):
+    """
+    同步处理逻辑，在后台执行
+    """
+    logger.info(f"Processing: {document_id}")
+    task_dir = _get_task_dir(document_id)
+
+    try:
+        # Save original JSON
+        ocr_json_path = task_dir / "ocr_result.json"
+        ocr_json_path.write_text(
+            json.dumps(ocr_json, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+
+        # 1. 从 JSON 提取 markdown 和页面信息
+        markdown_content, page_dict = _extract_from_paddleocr_json(ocr_json)
+
+        # Save markdown
+        ocr_md_path = task_dir / "ocr_result.md"
+        ocr_md_path.write_text(markdown_content, encoding="utf-8")
+
+        # 转换为 chunker 期望的格式
+        ocr_json_result = {
+            "pages": [
+                {"page_num": k - 1, "text": v}
+                for k, v in page_dict.items()
+            ]
+        }
+
+        # 2. Chunk & Index
+        _process_and_index_sync(document_id, markdown_content, ocr_json_result, source_file, task_dir)
+
+    except Exception as e:
+        logger.error(f"Failed to process {document_id}: {e}", exc_info=True)
+        _update_status(document_id, "failed", None, str(e))
+
+
+def _process_and_index_sync(
+    document_id: str,
+    markdown_content: str,
+    ocr_json_result: dict,
+    source_file: str,
+    task_dir: Path
+):
+    """
+    同步版本的核心处理逻辑
+    """
+    try:
+        # Update status: chunking
+        _update_status(document_id, "chunking", "文档切分中...")
+
+        # Chunk document
+        from app.services.chunker import get_chunker
+        chunker = get_chunker()
+
+        metadata = _documents.get(document_id, {})
+        doc_schema, intermediate = chunker.process_markdown(
+            markdown_content,
+            {
+                "document_id": document_id,
+                "source_file": source_file,
+                "company_name": metadata.get("company_name", "Unknown"),
+                "report_type": metadata.get("report_type", "annual_report"),
+                "report_title": metadata.get("report_title", ""),
+                "language": metadata.get("language", "en"),
+                "currency": metadata.get("currency", "USD"),
+                "fiscal_year": metadata.get("fiscal_year", 2025),
+                "fiscal_period": metadata.get("fiscal_period", "FY"),
+            },
+            ocr_json_result=ocr_json_result,
+            save_intermediate=task_dir
+        )
+
+        # Save final document schema
+        schema_path = task_dir / "document.json"
+        schema_path.write_text(
+            doc_schema.model_dump_json(indent=2),
+            encoding="utf-8"
+        )
+
+        # Update document metadata
+        _documents[document_id].update({
+            "report_type": doc_schema.document.report_type,
+            "report_title": doc_schema.document.report_title,
+            "language": doc_schema.document.language,
+            "currency": doc_schema.document.currency,
+            "fiscal_year": doc_schema.document.fiscal_year,
+            "fiscal_period": doc_schema.document.fiscal_period,
+            "report_date": doc_schema.document.report_date,
+            "page_count": doc_schema.document.page_count,
+            "task_dir": str(task_dir.relative_to(DATA_PATH)),
+        })
+
+        # Update status: indexing
+        _update_status(
+            document_id,
+            "indexing",
+            "索引中...",
+            total_chunks=len(doc_schema.chunks)
+        )
+
+        # Index document
+        index_document(doc_schema)
+
+        # Update status: completed
+        _update_status(
+            document_id,
+            "completed",
+            None,
+            indexed_chunks=len(doc_schema.chunks)
+        )
+
+        logger.info(f"Completed: {document_id} ({len(doc_schema.chunks)} chunks)")
+
+    except Exception as e:
+        logger.error(f"Failed: {document_id}: {e}", exc_info=True)
+        _update_status(document_id, "failed", None, str(e))
+
+
+def process_paddleocr_json_document_sync(document_id: str, ocr_json: list, source_file: str):
+    """
+    Background task: Process PaddleOCR-VL JSON document.
+    """
+    _run_sync_processing(document_id, ocr_json, source_file)
+
+
 @router.post("")
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None
 ):
     """
     Upload and process a document.
@@ -410,7 +604,6 @@ async def upload_document(
         # Save original PDF
         pdf_path = task_dir / "source.pdf"
         pdf_path.write_bytes(content)
-        logger.info(f"Saved source PDF to: {pdf_path}")
 
         # Extract basic metadata from filename
         filename = file.filename
@@ -448,78 +641,123 @@ async def upload_document(
         }
 
     else:
-        # === JSON Processing (existing logic) ===
+        # === JSON Processing ===
 
         try:
             doc_data = json.loads(content)
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="无效的 JSON 文件")
 
-        # Get document ID (support both flat and nested formats)
-        document_id = doc_data.get("document_id") or doc_data.get("document", {}).get("document_id")
-        if not document_id:
-            raise HTTPException(status_code=400, detail="JSON 中缺少 document_id")
+        # 检测 JSON 格式
+        if _is_paddleocr_format(doc_data):
+            # === PaddleOCR-VL 格式：异步处理 ===
+            logger.info(f"Upload: {file.filename} (PaddleOCR format)")
 
-        # Extract document metadata from nested structure if present
-        doc_meta = doc_data.get("document", doc_data)
+            # Generate document ID
+            document_id = str(uuid.uuid4())[:8]
 
-        # Save file
-        file_path = DATA_PATH / "uploads" / f"{document_id}.json"
-        file_path.write_bytes(content)
+            # Extract company name from filename
+            filename = file.filename
+            company_name = filename.replace("_by_PaddleOCR-VL", "").replace(".json", "").replace("_", " ")
 
-        # Store document metadata
-        _documents[document_id] = {
-            "document_id": document_id,
-            "source_file": file.filename,
-            "report_type": doc_meta.get("report_type"),
-            "report_title": doc_meta.get("report_title"),
-            "language": doc_meta.get("language"),
-            "currency": doc_meta.get("currency"),
-            "fiscal_year": doc_meta.get("fiscal_year"),
-            "fiscal_period": doc_meta.get("fiscal_period"),
-            "report_date": doc_meta.get("report_date"),
-            "page_count": doc_meta.get("page_count", len(doc_data.get("chunks", [])))
-        }
+            # Store initial metadata
+            _documents[document_id] = {
+                "document_id": document_id,
+                "source_file": filename,
+                "company_name": company_name,
+            }
 
-        # Create initial status
-        _document_status[document_id] = DocumentStatus(
-            document_id=document_id,
-            status="indexing",
-            file_type="json",
-            total_chunks=0,
-            indexed_chunks=0,
-            error=None,
-            source_file=file.filename,
-            created_at=datetime.now(),
-            updated_at=datetime.now()
-        )
-        _save_persistence()
-
-        # Index document
-        try:
-            # Convert dict to DocumentSchema
-            doc_schema = DocumentSchema(**doc_data)
-            index_document(doc_schema)
-
-            # Update status to completed
-            _document_status[document_id].status = "completed"
-            _document_status[document_id].total_chunks = len(doc_schema.chunks)
-            _document_status[document_id].indexed_chunks = len(doc_schema.chunks)
-            _document_status[document_id].updated_at = datetime.now()
+            # Create initial status
+            _document_status[document_id] = DocumentStatus(
+                document_id=document_id,
+                status="pending",
+                file_type="json",
+                total_chunks=0,
+                indexed_chunks=0,
+                error=None,
+                source_file=filename,
+                created_at=datetime.now(),
+                updated_at=datetime.now()
+            )
             _save_persistence()
 
-        except Exception as e:
-            logger.error(f"Failed to index document {document_id}: {e}")
-            _document_status[document_id].status = "failed"
-            _document_status[document_id].error = str(e)
-            _document_status[document_id].updated_at = datetime.now()
+            # Start background task
+            background_tasks.add_task(process_paddleocr_json_document_sync, document_id, doc_data, filename)
+
+            return {
+                "document_id": document_id,
+                "status": "pending",
+                "file_type": "json",
+                "message": "PaddleOCR JSON 上传成功，正在后台处理"
+            }
+
+        else:
+            # === DocumentSchema 格式：直接索引（兼容旧逻辑） ===
+            logger.info(f"Detected DocumentSchema format JSON: {file.filename}")
+
+            # Get document ID
+            document_id = doc_data.get("document_id") or doc_data.get("document", {}).get("document_id")
+            if not document_id:
+                raise HTTPException(status_code=400, detail="JSON 中缺少 document_id")
+
+            # Extract document metadata
+            doc_meta = doc_data.get("document", doc_data)
+
+            # Save file
+            file_path = DATA_PATH / "uploads" / f"{document_id}.json"
+            file_path.write_bytes(content)
+
+            # Store document metadata
+            _documents[document_id] = {
+                "document_id": document_id,
+                "source_file": file.filename,
+                "report_type": doc_meta.get("report_type"),
+                "report_title": doc_meta.get("report_title"),
+                "language": doc_meta.get("language"),
+                "currency": doc_meta.get("currency"),
+                "fiscal_year": doc_meta.get("fiscal_year"),
+                "fiscal_period": doc_meta.get("fiscal_period"),
+                "report_date": doc_meta.get("report_date"),
+                "page_count": doc_meta.get("page_count", len(doc_data.get("chunks", [])))
+            }
+
+            # Create initial status
+            _document_status[document_id] = DocumentStatus(
+                document_id=document_id,
+                status="indexing",
+                file_type="json",
+                total_chunks=0,
+                indexed_chunks=0,
+                error=None,
+                source_file=file.filename,
+                created_at=datetime.now(),
+                updated_at=datetime.now()
+            )
             _save_persistence()
 
-        return {
-            "document_id": document_id,
-            "status": "completed",
-            "file_type": "json"
-        }
+            # Index document
+            try:
+                doc_schema = DocumentSchema(**doc_data)
+                index_document(doc_schema)
+
+                _document_status[document_id].status = "completed"
+                _document_status[document_id].total_chunks = len(doc_schema.chunks)
+                _document_status[document_id].indexed_chunks = len(doc_schema.chunks)
+                _document_status[document_id].updated_at = datetime.now()
+                _save_persistence()
+
+            except Exception as e:
+                logger.error(f"Failed to index document {document_id}: {e}")
+                _document_status[document_id].status = "failed"
+                _document_status[document_id].error = str(e)
+                _document_status[document_id].updated_at = datetime.now()
+                _save_persistence()
+
+            return {
+                "document_id": document_id,
+                "status": "completed",
+                "file_type": "json"
+            }
 
 
 @router.get("")

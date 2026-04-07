@@ -65,38 +65,91 @@ class DocumentChunker:
             result_parts.append(page_dict[page_num])
         return "\n\n".join(result_parts)
 
-    def extract_toc_with_llm(self, first_pages: str) -> List[Dict[str, Any]]:
+    def generate_document_title(self, page_dict: Dict[int, str]) -> str:
         """
-        使用 LLM 从前几页提取目录结构
+        使用 LLM 从前两页内容生成文档标题
 
         Returns:
-            [{"title": "...", "page": 2, "level": 2}, ...]
+            生成的标题，如 "HSBC Holdings plc Annual Report 2025"
         """
-        system_prompt = """你是一个文档结构提取助手。请从目录文本中提取所有章节及其页码。
+        # 提取前两页
+        first_pages = []
+        for page_num in sorted(page_dict.keys())[:2]:
+            first_pages.append(page_dict[page_num][:2000])  # 每页最多2000字符
 
-输出 JSON 格式：
+        content = "\n\n".join(first_pages)
+
+        system_prompt = """You are a document title generator. Generate a concise and accurate title based on the document content.
+
+Rules:
+- Title should include: Company Name + Report Type + Year
+- Keep company name in original language (usually English)
+- Report types: Annual Report, 10-K, Interim Report, etc.
+- Output ONLY the title, nothing else
+- Maximum 100 characters"""
+
+        user_prompt = f"""Generate a title for the following document:
+
+---
+{content[:4000]}
+---
+
+Output the title:"""
+
+        try:
+            response = self.llm_client.chat.completions.create(
+                model=self.llm_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.1,
+            )
+
+            title = response.choices[0].message.content.strip()
+            # 清理可能的引号
+            title = title.strip('"\'')
+            logger.info(f"Generated title: {title}")
+            return title
+
+        except Exception as e:
+            logger.error(f"Failed to generate title: {e}")
+            return "Financial Report"
+
+    def check_page_for_toc(self, page_content: str, page_num: int) -> List[Dict[str, Any]]:
+        """
+        检查单页是否包含目录，如果是则提取目录结构
+
+        Returns:
+            目录条目列表，如果这页不是目录则返回空列表
+        """
+        system_prompt = """You are a document structure analyzer. Determine if this page is a table of contents (TOC) page.
+
+If it is a TOC page, extract the section structure and output JSON:
 {
+  "is_toc": true,
   "sections": [
     {"title": "Strategic report", "level": 1},
-    {"title": "Who we are and what we do", "page": 2, "level": 2},
-    {"title": "Group Chair's statement", "page": 4, "level": 2}
+    {"title": "Who we are", "page": 2, "level": 2}
   ]
 }
 
-规则：
-- level 1 = 大类章节（通常以 # 或 ## 开头，没有页码）
-- level 2 = 具体章节条目（有页码的行）
-- page 是整数，如果无法确定则设为 null
-- 忽略图片标签、HTML 标签、无关文字
-- 只输出 JSON，不要有其他文字"""
+If it is NOT a TOC page, output:
+{"is_toc": false, "sections": []}
 
-        user_prompt = f"""请从以下文本中提取章节结构：
+Rules:
+- level 1 = Major sections (titles without page numbers)
+- level 2 = Specific section entries (lines with page numbers)
+- page is an integer
+- Output ONLY JSON, nothing else"""
+
+        user_prompt = f"""Determine if the following content is a table of contents page:
 
 ---
-{first_pages[:8000]}
+{page_content[:4000]}
 ---
 
-请输出 JSON："""
+Output JSON:"""
 
         try:
             response = self.llm_client.chat.completions.create(
@@ -117,11 +170,35 @@ class DocumentChunker:
                 result_text = re.search(r'```\s*(.*?)\s*```', result_text, re.DOTALL).group(1)
 
             result = json.loads(result_text)
-            return result.get("sections", [])
+            is_toc = result.get("is_toc", False)
+            sections = result.get("sections", [])
+
+            logger.info(f"Page {page_num}: TOC={is_toc}, sections={len(sections)}")
+            return sections if is_toc else []
 
         except Exception as e:
-            logger.error(f"Failed to extract TOC with LLM: {e}")
+            logger.error(f"Failed to check page {page_num}: {e}")
             return []
+
+    def extract_toc_with_llm(self, page_dict: Dict[int, str], max_pages: int = 5) -> List[Dict[str, Any]]:
+        """
+        使用 LLM 逐页检查，找到目录页后提取结构
+
+        优化：一页一页检查，找到目录就停止，避免发送过多内容
+
+        Returns:
+            [{"title": "...", "page": 2, "level": 2}, ...]
+        """
+        sorted_pages = sorted(page_dict.keys())[:max_pages]
+
+        for page_num in sorted_pages:
+            sections = self.check_page_for_toc(page_dict[page_num], page_num)
+            if sections:
+                logger.info(f"Found TOC on page {page_num}: {len(sections)} sections")
+                return sections
+
+        logger.info(f"No TOC found in first {len(sorted_pages)} pages")
+        return []
 
     def estimate_tokens(self, text: str) -> int:
         """估算 token 数"""
@@ -376,11 +453,14 @@ class DocumentChunker:
 
         intermediate["page_dict"] = {k: v[:200] + "..." if len(v) > 200 else v for k, v in page_dict.items()}
 
-        # 2. 提取目录 (使用前 5 页)
-        first_pages = self.extract_first_n_pages(page_dict, 5)
-        toc_data = self.extract_toc_with_llm(first_pages)
+        # 2. 提取目录 (逐页检查，找到即停止)
+        toc_data = self.extract_toc_with_llm(page_dict, max_pages=5)
         logger.info(f"Extracted {len(toc_data)} TOC entries")
         intermediate["toc_data"] = toc_data
+
+        # 2.5 生成文档标题（如果没有提供）
+        if not document_metadata.get("report_title"):
+            document_metadata["report_title"] = self.generate_document_title(page_dict)
 
         # 3. 构建章节树
         sections = self.build_section_tree(toc_data, page_dict)
@@ -500,8 +580,8 @@ class DocumentChunker:
                 title=level1.get("title", ""),
                 normalized_title=level1.get("title", ""),
                 summary=None,
-                page_start=level1.get("page_start", 1),
-                page_end=level1.get("page_end", 1)
+                page_start=level1.get("page_start") or 1,
+                page_end=level1.get("page_end") or 1
             ))
 
             for level2 in level1.get("children", []):
@@ -513,8 +593,8 @@ class DocumentChunker:
                     title=level2.get("title", ""),
                     normalized_title=level2.get("title", ""),
                     summary=None,
-                    page_start=level2.get("page_start", 1),
-                    page_end=level2.get("page_end", 1)
+                    page_start=level2.get("page_start") or 1,
+                    page_end=level2.get("page_end") or 1
                 ))
 
         # 构建 chunks 列表

@@ -1,3 +1,15 @@
+import logging
+import sys
+
+# 配置日志 - 确保输出到控制台
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+# 设置 uvicorn 日志级别
+logging.getLogger("uvicorn").setLevel(logging.INFO)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router

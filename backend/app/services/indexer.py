@@ -5,7 +5,9 @@ from app.models.schemas import DocumentSchema, ChunkData
 from typing import List, Dict, Any
 import json
 import os
+import logging
 
+logger = logging.getLogger(__name__)
 _settings = get_settings()
 
 _model: BGEM3FlagModel | None = None
@@ -69,9 +71,11 @@ def index_document(document: DocumentSchema, status_callback=None) -> Dict[str, 
     chunks = document.chunks
 
     if not chunks:
+        logger.warning("No chunks to index")
         return {"indexed": 0, "error": "No chunks to index"}
 
     total_chunks = len(chunks)
+    logger.info(f"Indexing {total_chunks} chunks...")
 
     if status_callback:
         status_callback(total=total_chunks, indexed=0)
@@ -89,7 +93,8 @@ def index_document(document: DocumentSchema, status_callback=None) -> Dict[str, 
         embeddings = model.encode(
             batch,
             return_dense=True,
-            return_sparse=True
+            return_sparse=True,
+            return_colbert_vecs=False
         )
         all_dense_vecs.extend(embeddings['dense_vecs'])
         all_lexical_weights.extend(embeddings['lexical_weights'])
@@ -125,6 +130,7 @@ def index_document(document: DocumentSchema, status_callback=None) -> Dict[str, 
         sparse_weights=all_lexical_weights
     )
 
+    logger.info(f"Indexed {total_chunks} chunks")
     return {"indexed": total_chunks}
 
 

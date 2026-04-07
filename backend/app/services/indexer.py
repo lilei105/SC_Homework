@@ -139,3 +139,93 @@ def load_document_from_file(file_path: str) -> DocumentSchema:
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
     return DocumentSchema(**data)
+
+
+def update_chunk_metadata(
+    document_id: str,
+    chunk_id: str,
+    metadata: Dict[str, Any]
+) -> bool:
+    """
+    Update metadata for a specific chunk in Qdrant.
+
+    Args:
+        document_id: Document identifier
+        chunk_id: Chunk identifier
+        metadata: Metadata dict with keywords, entities, period, financial_metrics
+
+    Returns:
+        True if successful, False otherwise
+    """
+    from app.utils.qdrant_client import get_qdrant_client
+    from qdrant_client import models
+
+    try:
+        client = get_qdrant_client()
+
+        # Update the point's payload with new metadata
+        client.set_payload(
+            collection_name=_settings.collection_name,
+            points=[
+                models.PointStruct(
+                    id=f"{document_id}_{chunk_id}",
+                    payload=metadata
+                )
+            ]
+        )
+
+        logger.info(f"Updated metadata for chunk {chunk_id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to update chunk metadata: {e}")
+        return False
+
+
+def update_chunks_metadata_batch(
+    document_id: str,
+    chunks_metadata: List[Dict[str, Any]]
+) -> int:
+    """
+    Update metadata for multiple chunks in batch.
+
+    Args:
+        document_id: Document identifier
+        chunks_metadata: List of {"chunk_id": str, "metadata": dict}
+
+    Returns:
+        Number of successfully updated chunks
+    """
+    from app.utils.qdrant_client import get_qdrant_client
+    from qdrant_client import models
+
+    if not chunks_metadata:
+        return 0
+
+    try:
+        client = get_qdrant_client()
+
+        # Prepare points for batch update
+        points = []
+        for item in chunks_metadata:
+            chunk_id = item.get("chunk_id")
+            metadata = item.get("metadata", {})
+            points.append(
+                models.PointStruct(
+                    id=f"{document_id}_{chunk_id}",
+                    payload=metadata
+                )
+            )
+
+        # Batch upsert
+        client.upsert(
+            collection_name=_settings.collection_name,
+            points=points
+        )
+
+        logger.info(f"Updated metadata for {len(points)} chunks")
+        return len(points)
+
+    except Exception as e:
+        logger.error(f"Failed to batch update metadata: {e}")
+        return 0

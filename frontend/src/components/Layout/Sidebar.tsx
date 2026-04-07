@@ -11,7 +11,7 @@ interface SidebarProps {
 
 // 非终态：需要继续轮询
 const isProcessing = (status: string) =>
-  ['pending', 'parsing', 'chunking', 'indexing'].includes(status)
+  ['pending', 'parsing', 'chunking', 'indexing', 'enriching'].includes(status)
 
 export default function Sidebar({ currentDocId, onSelectDoc }: SidebarProps) {
   const [documents, setDocuments] = useState<Document[]>([])

@@ -293,7 +293,7 @@ async def _process_and_index_document(
         logger.info(f"[PROCESS] Starting chunk+index for {document_id}")
 
         # Update status: chunking
-        _update_status(document_id, "chunking", "文档切分中...")
+        _update_status(document_id, "chunking", "Chunking document...")
 
         # 2. Chunk document
         from app.services.chunker import get_chunker
@@ -357,7 +357,7 @@ async def _process_and_index_document(
         _update_status(
             document_id,
             "indexing",
-            "索引中...",
+            "Indexing...",
             total_chunks=len(doc_schema.chunks)
         )
 
@@ -399,7 +399,7 @@ async def process_pdf_document(document_id: str, file_path: Path):
         logger.info(f"Processing PDF document: {document_id}")
 
         # Update status: parsing
-        _update_status(document_id, "parsing", "OCR 识别中...")
+        _update_status(document_id, "parsing", "OCR processing...")
 
         # 1. OCR processing
         from app.services.baidu_ocr import get_ocr_service
@@ -482,7 +482,7 @@ def _process_and_index_sync(
     """
     try:
         # Update status: chunking
-        _update_status(document_id, "chunking", "文档切分中...")
+        _update_status(document_id, "chunking", "Chunking document...")
 
         # Chunk document
         from app.services.chunker import get_chunker
@@ -530,26 +530,103 @@ def _process_and_index_sync(
         _update_status(
             document_id,
             "indexing",
-            "索引中...",
+            "Indexing...",
             total_chunks=len(doc_schema.chunks)
         )
 
         # Index document
         index_document(doc_schema)
 
+        # Update status: enriching (background metadata extraction)
+        _update_status(
+            document_id,
+            "enriching",
+            "Extracting metadata...",
+        )
+
+        # Start background metadata enrichment
+        enrich_chunk_metadata_task(document_id, doc_schema.chunks)
+
+        logger.info(f"Indexed: {document_id} ({len(doc_schema.chunks)} chunks), starting metadata enrichment")
+
+    except Exception as e:
+        logger.error(f"Failed: {document_id}: {e}", exc_info=True)
+        _update_status(document_id, "failed", None, str(e))
+
+
+def enrich_chunk_metadata_task(document_id: str, chunks: List):
+    """
+    Background task: Extract and update chunk metadata using LLM.
+
+    This runs after indexing to enrich chunks with:
+    - keywords
+    - entities (companies, products, regions, people)
+    - period information
+    - financial metrics
+    """
+    from app.services.metadata_extractor import get_metadata_extractor
+    from app.services.indexer import update_chunks_metadata_batch
+
+    logger.info(f"[ENRICH] Starting metadata enrichment for {document_id} ({len(chunks)} chunks)")
+
+    try:
+        extractor = get_metadata_extractor()
+
+        # Process in batches of 5 to avoid overwhelming the LLM
+        batch_size = 5
+        all_metadata_updates = []
+
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+
+            for chunk in batch:
+                try:
+                    metadata = extractor.extract_chunk_metadata(
+                        content=chunk.content,
+                        section_title=chunk.section_title
+                    )
+
+                    all_metadata_updates.append({
+                        "chunk_id": chunk.chunk_id,
+                        "metadata": {
+                            "keywords": metadata.get("keywords", []),
+                            "entities": metadata.get("entities"),
+                            "period": metadata.get("period"),
+                            "financial_metrics": metadata.get("financial_metrics", [])
+                        }
+                    })
+
+                    logger.info(f"[ENRICH] Extracted metadata for chunk {chunk.chunk_id}")
+
+                except Exception as e:
+                    logger.error(f"[ENRICH] Failed to extract metadata for chunk {chunk.chunk_id}: {e}")
+
+            # Update progress
+            _update_status(
+                document_id,
+                "enriching",
+                f"Enriching metadata... ({min(i + batch_size, len(chunks))}/{len(chunks)} chunks)"
+            )
+
+        # Batch update in Qdrant
+        if all_metadata_updates:
+            updated = update_chunks_metadata_batch(document_id, all_metadata_updates)
+            logger.info(f"[ENRICH] Updated {updated} chunks in Qdrant")
+
         # Update status: completed
         _update_status(
             document_id,
             "completed",
             None,
-            indexed_chunks=len(doc_schema.chunks)
+            indexed_chunks=len(chunks)
         )
 
-        logger.info(f"Completed: {document_id} ({len(doc_schema.chunks)} chunks)")
+        logger.info(f"[ENRICH] Completed metadata enrichment for {document_id}")
 
     except Exception as e:
-        logger.error(f"Failed: {document_id}: {e}", exc_info=True)
-        _update_status(document_id, "failed", None, str(e))
+        logger.error(f"[ENRICH] Failed metadata enrichment for {document_id}: {e}", exc_info=True)
+        # Still mark as completed since indexing was successful
+        _update_status(document_id, "completed", None, indexed_chunks=len(chunks))
 
 
 def process_paddleocr_json_document_sync(document_id: str, ocr_json: list, source_file: str):

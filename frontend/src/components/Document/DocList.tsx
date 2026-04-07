@@ -1,13 +1,14 @@
 import type { Document, DocumentStatus } from '../../types'
 
-// 状态标签映射
+// Status label mapping
 const statusLabels: Record<string, { text: string; color: string }> = {
-  pending: { text: '等待处理', color: 'text-gray-400' },
-  parsing: { text: 'OCR 识别中', color: 'text-yellow-400' },
-  chunking: { text: '文档切分中', color: 'text-yellow-400' },
-  indexing: { text: '索引中', color: 'text-yellow-400' },
-  completed: { text: '已完成', color: 'text-green-400' },
-  failed: { text: '处理失败', color: 'text-red-400' },
+  pending: { text: 'Pending', color: 'text-gray-400' },
+  parsing: { text: 'OCR Processing', color: 'text-yellow-400' },
+  chunking: { text: 'Chunking', color: 'text-yellow-400' },
+  indexing: { text: 'Indexing', color: 'text-yellow-400' },
+  enriching: { text: 'Enriching Metadata', color: 'text-blue-400' },
+  completed: { text: 'Completed', color: 'text-green-400' },
+  failed: { text: 'Failed', color: 'text-red-400' },
 }
 
 interface DocListProps {
@@ -21,8 +22,8 @@ export default function DocList({ documents, statuses, currentDocId, onSelect }:
   if (documents.length === 0) {
     return (
       <div className="px-4 py-8 text-gray-400 text-sm text-center">
-        <p>暂无文档</p>
-        <p className="text-xs mt-1">点击上方按钮上传</p>
+        <p>No documents yet</p>
+        <p className="text-xs mt-1">Click the button above to upload</p>
       </div>
     )
   }

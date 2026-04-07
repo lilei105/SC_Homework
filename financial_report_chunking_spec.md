@@ -1,29 +1,30 @@
-# Financial Report → RAG Schema 转换实现规范（Hybrid: Deterministic + LLM）
+# Financial Report → RAG Schema Conversion Implementation Specification (Hybrid: Deterministic + LLM)
 
-本规范描述如何将 PaddleOCR-VL 输出 JSON 转换为符合 financial_report_rag_schema.jsonc 的结构化 chunks。
+This specification describes how to convert PaddleOCR-VL output JSON into structured chunks conforming to financial_report_rag_schema.jsonc.
 
-本版本为升级版：
+This is an upgraded version:
 
-Hybrid pipeline = 规则算法 + LLM 语义增强
+Hybrid pipeline = Rule-based algorithms + LLM semantic enhancement
 
-设计目标：
+Design goals:
 
-- 保证结构稳定
-- 提升 chunk 语义质量
-- 提升 KPI 抽取能力
-- 控制 token 成本
-- 可分批处理大文件
+- Ensure structural stability
+- Improve chunk semantic quality
+- Enhance KPI extraction capability
+- Control token costs
+- Support batch processing for large files
 
 ---
 
-# 1. 输入
+# 1. Input
 
-OCR JSON：
+OCR JSON:
 
 StandardChartered_2025_Annual_Report.pdf_by_PaddleOCR-VL-1.5_mini.json
 
-每页结构：
+Per-page structure:
 
+```
 {
   prunedResult:
   {
@@ -35,76 +36,79 @@ StandardChartered_2025_Annual_Report.pdf_by_PaddleOCR-VL-1.5_mini.json
     }
   }
 }
+```
 
 ---
 
-# 2. 输出
+# 2. Output
 
 financial_report_rag.json
 
-结构：
+Structure:
 
+```
 {
   document
   sections[]
   chunks[]
 }
+```
 
 ---
 
-# 3. pipeline 总览
+# 3. Pipeline Overview
 
-Stage 1 预处理（deterministic）
+Stage 1 Preprocessing (deterministic)
 
 page → cleaned markdown → token estimate
 
-Stage 2 页面复杂度判断（deterministic）
+Stage 2 Page Complexity Assessment (deterministic)
 
-simple page → 不调用 LLM
-complex page → 调用 LLM
+simple page → do not call LLM
+complex page → call LLM
 
-Stage 3 LLM semantic enhancement（optional）
+Stage 3 LLM Semantic Enhancement (optional)
 
 LLM tasks:
 
-1 页面分类
-2 semantic rewrite
-3 intelligent chunk split
-4 KPI extraction
-5 keywords generation
-6 brief generation
+1. Page classification
+2. Semantic rewrite
+3. Intelligent chunk split
+4. KPI extraction
+5. Keywords generation
+6. Brief generation
 
-Stage 4 schema 构造（deterministic）
+Stage 4 Schema Construction (deterministic)
 
-生成最终 chunks
+Generate final chunks
 
 ---
 
-# 4. 页面复杂度判断
+# 4. Page Complexity Assessment
 
-决定是否调用 LLM。
+Decides whether to call LLM.
 
-complex page 条件：
+Complex page conditions:
 
-满足任一：
+Satisfies any of:
 
-大量数字：
+Large number of numbers:
 
 count(numbers) > 20
 
-存在 image block：
+Contains image block:
 
 block_label == image
 
-短文本密集：
+Dense short text:
 
-平均行长度 < 40 字符
+average line length < 40 characters
 
-存在 % 或 bps：
+Contains % or bps:
 
 >5 occurrences
 
-包含关键词：
+Contains keywords:
 
 performance
 highlights
@@ -113,49 +117,44 @@ KPIs
 metrics
 financial
 
-实现：
+Implementation:
 
-
+```python
 def is_complex_page(md_text, blocks):
-
     num_numbers = count_numbers(md_text)
-
     num_percent = md_text.count('%')
-
     has_image = any(b['block_label']=='image' for b in blocks)
-
     avg_line_length = average_line_length(md_text)
 
     if num_numbers > 20:
         return True
-
     if num_percent > 5:
         return True
-
     if has_image:
         return True
-
     if avg_line_length < 40:
         return True
 
     return False
+```
 
 ---
 
-# 5. markdown 预处理
+# 5. Markdown Preprocessing
 
-remove image tags
+Remove image tags
 
 ![](img.png) → [figure]
 
-normalize whitespace
+Normalize whitespace
 
 ---
 
-# 6. LLM 输入结构
+# 6. LLM Input Structure
 
-LLM 输入 JSON：
+LLM input JSON:
 
+```
 {
   page_index
   markdown
@@ -169,25 +168,26 @@ LLM 输入 JSON：
   ]
   section_hint
 }
+```
 
-只提供：
+Only provide:
 
-非 header/footer blocks
+Non-header/footer blocks
 
 ---
 
-# 7. LLM 输出结构
+# 7. LLM Output Structure
 
-LLM 必须返回 JSON：
+LLM must return JSON:
 
+```
 {
   page_type:
-
-  narrative
-  kpi_dashboard
-  table_like
-  figure_page
-  mixed
+    narrative
+    kpi_dashboard
+    table_like
+    figure_page
+    mixed
 
   should_split:
   boolean
@@ -208,11 +208,13 @@ LLM 必须返回 JSON：
     }
   ]
 }
+```
 
 ---
 
-# 8. financial_metrics schema
+# 8. financial_metrics Schema
 
+```
 {
   metric_name
   value
@@ -220,45 +222,48 @@ LLM 必须返回 JSON：
   period_label
   context
 }
+```
 
-示例：
+Example:
 
+```
 {
   metric_name: Return on tangible equity
   value: 14.7
   unit: %
   period_label: FY2025
 }
+```
 
 ---
 
-# 9. simple page chunking
+# 9. Simple Page Chunking
 
-不调用 LLM。
+Do not call LLM.
 
-步骤：
+Steps:
 
-按 heading 切分
+Split by heading
 
-超过 500 tokens 再切
+If exceeds 500 tokens, split again
 
-生成 chunk
-
----
-
-# 10. intelligent split strategy
-
-LLM 决定：
-
-是否拆分
-
-拆分边界
-
-chunk title
+Generate chunk
 
 ---
 
-# 11. chunk_type 映射
+# 10. Intelligent Split Strategy
+
+LLM decides:
+
+Whether to split
+
+Split boundaries
+
+Chunk title
+
+---
+
+# 11. chunk_type Mapping
 
 LLM chunk_type → schema chunk_type
 
@@ -274,41 +279,41 @@ mixed → mixed
 
 ---
 
-# 12. token 控制
+# 12. Token Control
 
-硬限制：
+Hard limit:
 
 500 tokens
 
-超过必须再次切分：
+If exceeded, must split again:
 
 sliding window
 
 ---
 
-# 13. deterministic fallback
+# 13. Deterministic Fallback
 
-若 LLM 失败：
+If LLM fails:
 
-使用 simple chunking
+Use simple chunking
 
-记录：
+Record:
 
 flags.llm_failed = true
 
 ---
 
-# 14. source_trace 构造
+# 14. source_trace Construction
 
 source_block_ids
 
-来自：
+From:
 
 LLM
 
-或
+or
 
-整页 block ids
+Full page block ids
 
 ---
 
@@ -324,45 +329,40 @@ bundle_p0004
 
 ---
 
-# 17. section 构造
+# 17. Section Construction
 
-优先使用：
+Priority:
 
 LLM chunk_title
 
-否则：
+Otherwise:
 
 markdown heading
 
 ---
 
-# 18. 主流程伪代码
+# 18. Main Flow Pseudocode
 
+```python
 for page in document:
-
     md = clean_markdown(page.markdown)
-
     blocks = filter_blocks(page.blocks)
 
     if is_complex_page(md, blocks):
-
         llm_result = call_llm()
-
         chunks = build_chunks_from_llm(llm_result)
-
     else:
-
         chunks = simple_split(md)
 
     enforce_token_limit(chunks)
-
     attach_source_trace(chunks)
+```
 
 ---
 
-# 19. prompt 约束
+# 19. Prompt Constraints
 
-system prompt：
+System prompt:
 
 You convert OCR text into semantic chunks for financial retrieval.
 
@@ -382,11 +382,11 @@ Output JSON only
 
 ---
 
-# 20. 性能建议
+# 20. Performance Recommendations
 
-只对 20–40% 页面调用 LLM。
+Only call LLM for 20–40% of pages.
 
-优先调用：
+Priority:
 
 performance summary pages
 
@@ -396,55 +396,51 @@ KPI dashboards
 
 ---
 
-# 21. 并行处理
+# 21. Parallel Processing
 
-每页独立。
+Each page is independent.
 
-可并行调用 LLM。
+Can call LLM in parallel.
 
 ---
 
-# 22. 成本控制策略
+# 22. Cost Control Strategy
 
 max tokens per page prompt: 1200
 
-只传必要 blocks
+Only pass necessary blocks
 
-不传 bbox
+Do not pass bbox
 
 ---
 
 # 23. CLI
 
+```
 python convert.py
-
 --input ocr.json
-
 --output rag.json
-
 --llm openai
-
 --model gpt-4.1-mini
-
 --parallel 8
+```
 
 ---
 
-# 24. 验收标准
+# 24. Acceptance Criteria
 
 chunk token <= 500
 
-每页 ≥1 chunk
+At least 1 chunk per page
 
-financial_metrics 正确
+financial_metrics correct
 
-keywords 存在
+keywords exist
 
-brief 存在
+brief exists
 
-source_trace 存在
+source_trace exists
 
-chunk_type 正确
+chunk_type correct
 
 JSON schema valid
-

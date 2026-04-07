@@ -231,27 +231,38 @@ Rules:
 
 ### Stage 5: Chunking
 
-**Input**: Section tree with content
+**Input**: Section tree with two-level hierarchy (level-1 containers, level-2 sections with content)
 
 **Process**:
 
-1. **Classify section type**:
+1. **Iterate over level-2 sections only**:
+   - Level-1 sections are containers (e.g., "Strategic report")
+   - Level-2 sections contain actual content (e.g., "Performance in 2024")
+   - Only level-2 sections are chunked
+
+2. **Classify each level-2 section**:
    - `narrative`: Regular text sections
-   - `table_heavy`: Multiple tables (≥3 table markers)
-   - `kpi`: Key performance indicators
+   - `table_heavy`: Multiple tables (≥3 `|---` markers)
+   - `kpi`: Key performance indicators (title contains "key performance", "kpi", "financial highlight")
    - `mixed_media`: Contains images/figures
-   - `risk_disclosure`: Risk-related sections
-   - `appendix`: Supplementary material
+   - `risk_disclosure`: Risk-related sections (title contains "risk" or "disclosure")
+   - `appendix`: Supplementary material (title contains "appendix" or "supplementary")
 
-2. **Split into chunks** (max 512 tokens each):
+3. **Split each level-2 section into chunks** (max 512 tokens):
    - If section ≤ 512 tokens: Single chunk
-   - If section > 512 tokens: Split by paragraphs
-   - Preserve complete paragraphs where possible
+   - If section > 512 tokens: Split by double newlines (`\n\n+`)
+   - Accumulate paragraphs until limit, then start new chunk
+   - Preserve complete paragraphs
 
-3. **Enrich chunk metadata**:
-   - `section_path`: `["Strategic report", "Highlights"]`
-   - `page_start` / `page_end`: Source page range
+4. **Enrich chunk metadata**:
+   - `section_path`: `[level1_title, level2_title]` (e.g., `["Strategic report", "Highlights"]`)
+   - `page_start` / `page_end`: Source page range from section
    - `chunk_type`: Section classification
+   - `chunk_id`: `chunk_0000`, `chunk_0001`, ...
+
+5. **Fallback** (if no chunks generated):
+   - Create single chunk from all page content
+   - Used when TOC extraction fails or document has no clear structure
 
 **Output**:
 ```json
@@ -473,11 +484,16 @@ Unlike naive page-level or sliding-window chunking, our approach:
    - "Financial Highlights" spans pages 2-4 → Single section
    - Preserves cross-page tables and discussions
 
-2. **Split within sections**: If a section exceeds 512 tokens, split by paragraph boundaries
+2. **Two-level hierarchy**: 
+   - Level-1 sections (e.g., "Strategic Report") are containers
+   - Level-2 sections (e.g., "Financial Highlights") contain actual content
+   - Only level-2 sections are chunked
+
+3. **Split within level-2 sections**: If a section exceeds 512 tokens, split by paragraph boundaries
    - Maintains semantic coherence
    - Avoids mid-sentence breaks
 
-3. **Preserve hierarchy**: Each chunk knows its `section_path` (e.g., `["Strategic Report", "Financial Highlights"]`)
+4. **Preserve hierarchy**: Each chunk knows its `section_path` (e.g., `["Strategic Report", "Financial Highlights"]`)
 
 This approach prevents:
 - Tables split across arbitrary page boundaries

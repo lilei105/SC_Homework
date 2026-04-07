@@ -2,59 +2,59 @@
   // ============================================================================
   // Financial Report RAG Intermediate Schema
   // ----------------------------------------------------------------------------
-  // 用途：
-  // 1. 接收 OCR / 版面分析 / 表格抽取之后的“已清洗结果”
-  // 2. 作为后续 chunking / embedding / BM25 / rerank / QA / summary 的统一输入
-  // 3. 不要求包含 embedding、rerank score、OCR bbox 全量细节
+  // Purpose:
+  // 1. Accept "cleaned results" after OCR / layout analysis / table extraction
+  // 2. Serve as unified input for downstream chunking / embedding / BM25 / rerank / QA / summary
+  // 3. Does not require embedding, rerank scores, or full OCR bbox details
   //
-  // 设计原则：
-  // - 文档级、章节级、chunk级信息分层保存
-  // - table / figure 不只保留原始结构，还要提供可检索文本 content
-  // - 保留 page / source_trace / relations，方便 citation 与 bundling
-  // - 支持后续扩展 metrics extraction / summary generation
+  // Design Principles:
+  // - Store document-level, section-level, chunk-level information in layers
+  // - Tables / figures should not only preserve original structure but also provide searchable text content
+  // - Preserve page / source_trace / relations for citation and bundling
+  // - Support future extension for metrics extraction / summary generation
   // ============================================================================
 
   "schema_version": "1.0",
 
   // ============================================================================
-  // 文档级元数据
+  // Document-level Metadata
   // ============================================================================
   "document": {
-    // 系统内唯一 ID
+    // Unique system ID
     "document_id": "nvidia_fy2024_10k",
 
-    // 原始 PDF 文件名
+    // Original PDF filename
     "source_file": "NVIDIA_2024_10K.pdf",
 
-    // 公司名
+    // Company name
     "company_name": "NVIDIA Corporation",
 
-    // 可选：股票代码
+    // Optional: Stock ticker
     "ticker": "NVDA",
 
-    // 报告类型：10k / 10q / annual_report / quarterly_report / earnings_release / shareholder_letter / other
+    // Report type: 10k / 10q / annual_report / quarterly_report / earnings_release / shareholder_letter / other
     "report_type": "10k",
 
-    // 人类可读标题
+    // Human-readable title
     "report_title": "NVIDIA Corporation Form 10-K Annual Report for Fiscal Year 2024",
 
-    // 文档语言
+    // Document language
     "language": "en",
 
-    // 主货币
+    // Primary currency
     "currency": "USD",
 
-    // 财年与期间
+    // Fiscal year and period
     "fiscal_year": 2024,
     "fiscal_period": "FY",
 
-    // 报告发布日期（如果有）
+    // Report publication date (if available)
     "report_date": "2024-02-21",
 
-    // 总页数（可选）
+    // Total page count (optional)
     "page_count": 95,
 
-    // OCR / 解析来源说明
+    // OCR / Parser source information
     "parser": {
       "provider": "manual_structuring",
       "version": null,
@@ -63,12 +63,12 @@
   },
 
   // ============================================================================
-  // 章节级信息
+  // Section-level Information
   // ----------------------------------------------------------------------------
-  // 作用：
-  // - 给 chunk 提供 section_title / section_summary
-  // - 支持 metadata-aware retrieval
-  // - 支持 summary 时按章节聚合
+  // Purpose:
+  // - Provide section_title / section_summary for chunks
+  // - Support metadata-aware retrieval
+  // - Support section-level aggregation during summary generation
   // ============================================================================
   "sections": [
     {
@@ -90,50 +90,50 @@
   ],
 
   // ============================================================================
-  // Chunk 级知识单元
+  // Chunk-level Knowledge Units
   // ----------------------------------------------------------------------------
-  // 每个 chunk 必须已经过：
-  // - OCR / 文本清洗
-  // - 必要的断行修复
-  // - 表格文本化 / 图表说明文本化
+  // Each chunk must have been:
+  // - OCR / text cleaned
+  // - Necessary line break fixes applied
+  // - Tables textualized / figure descriptions textualized
   //
-  // chunk_type 允许值：text / table / figure / mixed
+  // Allowed chunk_type values: text / table / figure / mixed
   // ============================================================================
   "chunks": [
     {
       // ------------------------------------------------------------------------
-      // 基本身份信息
+      // Basic Identity Information
       // ------------------------------------------------------------------------
       "chunk_id": "c0001",
       "chunk_index": 1,
 
-      // 所属章节
+      // Parent section
       "section_id": "sec_002",
       "section_title": "Item 7. Management's Discussion and Analysis of Financial Condition and Results of Operations",
       "section_summary": "This section discusses revenue drivers, gross margin trends, operating expenses, liquidity, and capital resources.",
 
-      // 来源页码范围
+      // Source page range
       "page_start": 25,
       "page_end": 25,
 
       // ------------------------------------------------------------------------
-      // Chunk 类型
+      // Chunk Type
       // ------------------------------------------------------------------------
       "chunk_type": "table",
 
       // ------------------------------------------------------------------------
-      // 主检索文本（RAG 真正要用的文本）
+      // Primary Searchable Text (the text RAG actually uses)
       // ------------------------------------------------------------------------
-      // 要求：
-      // - 对 text：放清洗后的正文
-      // - 对 table：放“可问答”的自然语言或键值文本，不要只放原始 markdown 表
-      // - 对 figure：放图标题 + 图注 + 必要描述
+      // Requirements:
+      // - For text: cleaned body text
+      // - For table: "answerable" natural language or key-value text, not just raw markdown tables
+      // - For figure: figure title + caption + necessary description
       "content": "In FY2024, NVIDIA reported Data Center revenue of 47.5 billion USD, Gaming revenue of 10.4 billion USD, Professional Visualization revenue of 1.6 billion USD, and Automotive revenue of 1.1 billion USD.",
 
-      // 可选：简短摘要，用于检索结果展示 / 轻量预筛选
+      // Optional: brief summary for search result display / lightweight pre-filtering
       "content_brief": "Revenue breakdown by market platform for FY2024.",
 
-      // 可选：稀疏检索 / metadata boost 用关键词
+      // Optional: keywords for sparse retrieval / metadata boosting
       "keywords": [
         "revenue",
         "Data Center",
@@ -144,9 +144,9 @@
       ],
 
       // ------------------------------------------------------------------------
-      // 时间 / 期间信息
+      // Time / Period Information
       // ------------------------------------------------------------------------
-      // 财报问答里 period 非常重要，建议显式结构化
+      // Period is critical for financial Q&A, recommend explicit structuring
       "period": {
         "fiscal_year": 2024,
         "fiscal_period": "FY",
@@ -156,7 +156,7 @@
       },
 
       // ------------------------------------------------------------------------
-      // 实体信息（可选）
+      // Entity Information (optional)
       // ------------------------------------------------------------------------
       "entities": {
         "company": ["NVIDIA Corporation"],
@@ -166,12 +166,12 @@
       },
 
       // ------------------------------------------------------------------------
-      // 原始结构化表格（可选，但强烈推荐）
+      // Original Structured Table (optional but strongly recommended)
       // ------------------------------------------------------------------------
-      // 用途：
-      // - 指标抽取
-      // - 数值校验
-      // - 后续生成 executive summary 时更稳
+      // Purpose:
+      // - Metric extraction
+      // - Numerical validation
+      // - More stable for generating executive summaries
       "table_data": {
         "table_title": "Revenue by Market Platform",
         "unit": "millions USD",
@@ -184,13 +184,13 @@
         ]
       },
 
-      // figure chunk 时使用；非 figure 则填 null
+      // Used for figure chunks; set to null for non-figure chunks
       "figure_data": null,
 
       // ------------------------------------------------------------------------
-      // 可选：轻量 financial metrics
+      // Optional: Lightweight Financial Metrics
       // ------------------------------------------------------------------------
-      // 不要求非常全；只放后续 API 真的会用到的关键值
+      // Does not need to be exhaustive; only include key values that downstream APIs will actually use
       "financial_metrics": [
         {
           "name": "Data Center revenue",
@@ -209,9 +209,9 @@
       ],
 
       // ------------------------------------------------------------------------
-      // 来源追踪
+      // Source Traceability
       // ------------------------------------------------------------------------
-      // 用途：citation / debug / 回溯 OCR 原文
+      // Purpose: citation / debug / trace back to OCR original text
       "source_trace": {
         "source_block_ids": ["p25_b10", "p25_b11"],
         "raw_text_excerpt": "Table 2: Revenue by Market Platform ...",
@@ -219,25 +219,25 @@
       },
 
       // ------------------------------------------------------------------------
-      // 邻接关系
+      // Adjacency Relations
       // ------------------------------------------------------------------------
-      // 用于后续 chunk bundling / expansion
+      // Used for downstream chunk bundling / expansion
       "relations": {
         "prev_chunk_id": "c0000",
         "next_chunk_id": "c0002"
       },
 
       // ------------------------------------------------------------------------
-      // 可选：显式分组 ID
+      // Optional: Explicit Grouping ID
       // ------------------------------------------------------------------------
-      // 适合：
-      // - 跨页表格
-      // - 图 + 图注
-      // - 标题块 + 数据块
+      // Suitable for:
+      // - Cross-page tables
+      // - Figure + figure caption
+      // - Title block + data block
       "bundle_id": "table_revenue_platform",
 
       // ------------------------------------------------------------------------
-      // 可选：标记位
+      // Optional: Flag Markers
       // ------------------------------------------------------------------------
       "flags": {
         "is_section_lead": false,

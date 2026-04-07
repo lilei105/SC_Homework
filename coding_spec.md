@@ -1,22 +1,22 @@
-# 财务报表问答系统 (Financial RAG) 代码实现方案
+# Financial Report RAG System - Code Implementation Guide
 
-本方案基于 `prd.md` 及 `financial_report_rag_schema.jsonc` 设计，旨在为 Claude Code 提供清晰、可执行的工程实现指南。系统采用 FastAPI + React 的前后端分离架构，核心检索与生成逻辑完全遵循 PRD 中定义的“高精度、易部署”本地与在线混合架构。
+This guide is based on `prd.md` and `financial_report_rag_schema.jsonc`, providing clear and executable engineering implementation instructions for Claude Code. The system adopts FastAPI + React frontend-backend architecture, with core retrieval and generation logic fully following the "high-precision, easy-to-deploy" hybrid local and online architecture defined in the PRD.
 
-## 1. 系统架构与技术栈选型
+## 1. System Architecture & Technology Stack
 
-为满足快速迭代与本地部署的需求，系统采用以下技术栈：
+To meet rapid iteration and local deployment requirements, the system adopts the following technology stack:
 
-*   **后端框架**：FastAPI (Python 3.11+)
-*   **前端框架**：React + TypeScript + TailwindCSS (Vite 构建)
-*   **向量数据库**：Qdrant (使用 `qdrant-client` 的本地文件模式，无需独立部署 Server) [1]
-*   **核心模型**：
-    *   **Embedding & Sparse & ColBERT**：`BAAI/bge-m3` (通过 `FlagEmbedding` 库本地运行) [2]
-    *   **Cross-Encoder Reranker**：`BAAI/bge-reranker-v2-gemma` (通过 `FlagEmbedding` 库本地运行) [3]
-    *   **LLM (摘要与生成)**：智谱 `glm-4-flash` API (通过 `zhipuai` SDK 调用) [4]
+*   **Backend Framework**: FastAPI (Python 3.11+)
+*   **Frontend Framework**: React + TypeScript + TailwindCSS (Vite build)
+*   **Vector Database**: Qdrant (using `qdrant-client` local file mode, no separate server deployment required) [1]
+*   **Core Models**:
+    *   **Embedding & Sparse & ColBERT**: `BAAI/bge-m3` (running locally via `FlagEmbedding` library) [2]
+    *   **Cross-Encoder Reranker**: `BAAI/bge-reranker-v2-gemma` (running locally via `FlagEmbedding` library) [3]
+    *   **LLM (Summary & Generation)**: Zhipu `glm-4-flash` API (via `zhipuai` SDK) [4]
 
-## 2. 项目目录结构
+## 2. Project Directory Structure
 
-为了让 Claude Code 能够顺利构建项目，建议采用以下目录结构：
+To enable Claude Code to successfully build the project, the following directory structure is recommended:
 
 ```text
 financial-rag/
@@ -24,56 +24,56 @@ financial-rag/
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── endpoints/
-│   │   │   │   ├── documents.py    # 文档上传与索引接口
-│   │   │   │   └── chat.py         # 问答交互接口
-│   │   │   └── router.py           # 路由注册
+│   │   │   │   ├── documents.py    # Document upload and indexing API
+│   │   │   │   └── chat.py         # Q&A interaction API
+│   │   │   └── router.py           # Route registration
 │   │   ├── core/
-│   │   │   ├── config.py           # 环境变量与配置管理
-│   │   │   └── prompts.py          # LLM Prompt 模板集中管理
+│   │   │   ├── config.py           # Environment variables and configuration management
+│   │   │   └── prompts.py          # LLM Prompt templates centralized management
 │   │   ├── models/
-│   │   │   └── schemas.py          # Pydantic 数据模型 (基于 JSON Schema)
+│   │   │   └── schemas.py          # Pydantic data models (based on JSON Schema)
 │   │   ├── services/
-│   │   │   ├── indexer.py          # 索引管道逻辑
-│   │   │   ├── retriever.py        # 检索管道逻辑
-│   │   │   ├── reranker.py         # 重排序逻辑
-│   │   │   ├── generator.py        # 答案生成逻辑
-│   │   │   └── llm_client.py       # 智谱 API 封装
+│   │   │   ├── indexer.py          # Indexing pipeline logic
+│   │   │   ├── retriever.py        # Retrieval pipeline logic
+│   │   │   ├── reranker.py         # Re-ranking logic
+│   │   │   ├── generator.py        # Answer generation logic
+│   │   │   └── llm_client.py       # Zhipu API wrapper
 │   │   ├── utils/
-│   │   │   └── qdrant_client.py    # Qdrant 客户端单例封装
-│   │   └── main.py                 # FastAPI 应用入口
-│   ├── data/                       # 本地数据存储 (Qdrant 数据、上传的 JSON)
-│   ├── requirements.txt            # Python 依赖
-│   └── .env                        # 环境变量文件 (API Key 等)
+│   │   │   └── qdrant_client.py    # Qdrant client singleton wrapper
+│   │   └── main.py                 # FastAPI application entry point
+│   ├── data/                       # Local data storage (Qdrant data, uploaded JSON)
+│   ├── requirements.txt            # Python dependencies
+│   └── .env                        # Environment variables file (API Key, etc.)
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── Chat/
-│   │   │   │   ├── ChatBox.tsx     # 聊天主界面
-│   │   │   │   ├── Message.tsx     # 单条消息组件 (支持 Markdown 和 Citation Badge)
-│   │   │   │   └── InputArea.tsx   # 输入框组件
-│   │   │   ├── Document/
-│   │   │   │   ├── UploadModal.tsx # 文件上传弹窗
-│   │   │   │   └── DocList.tsx     # 已索引文档列表
-│   │   │   └── Layout/
-│   │   │       ├── Sidebar.tsx     # 侧边栏 (文档管理 + 历史会话)
-│   │   │       └── Header.tsx      # 顶部导航栏
+│   │   │   │   ├── ChatBox.tsx     # Main chat interface
+│   │   │   │   ├── Message.tsx     # Single message component (supports Markdown and Citation Badge)
+│   │   │   │   └── InputArea.tsx   # Input area component
+│   │   ├── Document/
+│   │   │   │   ├── UploadModal.tsx # File upload modal
+│   │   │   │   └── DocList.tsx     # Indexed document list
+│   │   ├── Layout/
+│   │   │   │   ├── Sidebar.tsx     # Sidebar (document management + session history)
+│   │   │   │   └── Header.tsx      # Top navigation bar
 │   │   ├── hooks/
-│   │   │   └── useChat.ts          # 封装 SSE 流式请求逻辑
+│   │   │   └── useChat.ts          # Encapsulates SSE streaming request logic
 │   │   ├── services/
-│   │   │   └── api.ts              # 前端 API 请求封装
+│   │   │   └── api.ts              # Frontend API request wrapper
 │   │   ├── types/
-│   │   │   └── index.ts            # TypeScript 类型定义
-│   │   ├── App.tsx                 # 根组件
-│   │   └── main.tsx                # React 入口
+│   │   │   └── index.ts            # TypeScript type definitions
+│   │   ├── App.tsx                 # Root component
+│   │   └── main.tsx                # React entry point
 │   ├── package.json
 │   ├── tailwind.config.js
 │   └── vite.config.ts
 └── README.md
 ```
 
-## 3. 核心数据结构设计 (Pydantic Models)
+## 3. Core Data Structure Design (Pydantic Models)
 
-后端需基于提供的 JSON Schema 定义严格的 Pydantic 模型，以确保数据流转的类型安全。请在 `backend/app/models/schemas.py` 中实现：
+Backend needs to define strict Pydantic models based on provided JSON Schema to ensure type safety during data flow. Implement in `backend/app/models/schemas.py`:
 
 ```python
 from pydantic import BaseModel, Field
@@ -104,7 +104,7 @@ class ChunkData(BaseModel):
     keywords: List[str] = []
     period: Optional[PeriodInfo] = None
     financial_metrics: List[FinancialMetric] = []
-    # 其他字段根据 Schema 补充...
+    # Other fields according to Schema...
 
 class DocumentSchema(BaseModel):
     document: Dict[str, Any]
@@ -112,18 +112,18 @@ class DocumentSchema(BaseModel):
     chunks: List[ChunkData]
 ```
 
-## 4. 核心模块实现指南
+## 4. Core Module Implementation Guide
 
-### 4.1 索引管道 (Indexing Pipeline)
+### 4.1 Indexing Pipeline
 
-**目标**：解析 JSON，调用 LLM 生成摘要，使用 BGE-M3 提取 Dense 和 Sparse 向量，并存入 Qdrant。
+**Goal**: Parse JSON, call LLM for summary generation, use BGE-M3 to extract Dense and Sparse vectors, and store in Qdrant.
 
-1.  **Qdrant 集合初始化** (`backend/app/utils/qdrant_client.py`)：
-    使用 `qdrant-client` 的本地模式初始化集合，配置 `dense` 和 `sparse` 两个命名向量。
+1.  **Qdrant Collection Initialization** (`backend/app/utils/qdrant_client.py`):
+    Initialize collection using `qdrant-client` local mode, configure `dense` and `sparse` named vectors.
 
     ```python
     from qdrant_client import QdrantClient, models
-    
+
     client = QdrantClient(path="./data/qdrant_storage")
     client.create_collection(
         collection_name="financial_reports",
@@ -136,18 +136,18 @@ class DocumentSchema(BaseModel):
     )
     ```
 
-2.  **块级元数据增强** (`backend/app/services/indexer.py`)：
-    由于上游预处理已在 JSON Schema 中提供了丰富的元数据（如 `section_title`、`section_summary`、`content_brief`、`period` 等），系统**无需再调用 LLM 生成摘要**。
-    直接利用 Schema 中已有的字段进行字符串拼接，形成高信息密度的 `augmented_text`。
+2.  **Chunk-level Metadata Augmentation** (`backend/app/services/indexer.py`):
+    Since upstream preprocessing already provides rich metadata in JSON Schema (such as `section_title`, `section_summary`, `content_brief`, `period`, etc.), the system **does not need to call LLM for summary generation**.
+    Directly use existing fields in Schema for string concatenation to form high-density `augmented_text`.
     
     ```python
     augmented_texts = []
     for chunk in chunks:
-        # 提取公司名、财报期间、章节标题和块级简短摘要
+        # Extract company name, report period, section title and chunk-level brief
         company = document_metadata.get("company_name", "")
         period_label = chunk.period.date_label if chunk.period else ""
         
-        # 拼接格式：[公司名] [期间] - [章节标题] \n [块级摘要] \n\n [正文]
+        # Concatenation format: [Company] [Period] - [Section Title] \n [Chunk Brief] \n\n [Content]
         header = f"{company} {period_label} - {chunk.section_title}"
         brief = chunk.content_brief if chunk.content_brief else ""
         
@@ -155,58 +155,58 @@ class DocumentSchema(BaseModel):
         augmented_texts.append(augmented_text)
     ```
 
-3.  **BGE-M3 向量提取与存储** (`backend/app/services/indexer.py`)：
-    使用 `FlagEmbedding` 提取向量。注意：此处**不存储** ColBERT 向量。
+3.  **BGE-M3 Vector Extraction and Storage** (`backend/app/services/indexer.py`):
+    Use `FlagEmbedding` to extract vectors. Note: **Do not store** ColBERT vectors here.
 
     ```python
     from FlagEmbedding import BGEM3FlagModel
-    
+
     model = BGEM3FlagModel('BAAI/bge-m3', use_fp16=True)
-    
-    # 提取 Dense 和 Sparse
+
+    # Extract Dense and Sparse
     embeddings = model.encode(augmented_texts, return_dense=True, return_sparse=True)
     dense_vecs = embeddings['dense_vecs']
     lexical_weights = embeddings['lexical_weights'] # List of dicts {token_id: weight}
-    
-    # 构造 Qdrant PointStruct 并插入
+
+    # Construct Qdrant PointStruct and insert
     points = []
     for i, chunk in enumerate(chunks):
-        # 将 lexical_weights 转换为 Qdrant SparseVector 格式
+        # Convert lexical_weights to Qdrant SparseVector format
         indices = list(lexical_weights[i].keys())
         values = list(lexical_weights[i].values())
-        
+
         points.append(models.PointStruct(
-            id=chunk.chunk_id, # 需转换为 UUID 或整数
+            id=chunk.chunk_id, # Need to convert to UUID or integer
             vector={
                 "dense": dense_vecs[i].tolist(),
                 "sparse": models.SparseVector(indices=indices, values=values)
             },
-            payload=chunk.model_dump() # 存储完整 Chunk 数据
+            payload=chunk.model_dump() # Store complete Chunk data
         ))
     client.upsert(collection_name="financial_reports", points=points)
     ```
 
-### 4.2 检索管道 (Retrieval Pipeline)
+### 4.2 Retrieval Pipeline
 
-**目标**：查询重写，Qdrant 混合检索，页面级块绑定。
+**Goal**: Query rewriting, Qdrant hybrid retrieval, page-level chunk bundling.
 
-1.  **查询重写** (`backend/app/services/retriever.py`)：调用智谱 API，将用户 Query 转换为标准化检索词。
-2.  **混合检索 (Hybrid Search)** (`backend/app/services/retriever.py`)：
-    使用 Qdrant 的 Query API 和 Reciprocal Rank Fusion (RRF) 进行多路召回。
+1.  **Query Rewriting** (`backend/app/services/retriever.py`): Call Zhipu API to convert user Query to standardized retrieval terms.
+2.  **Hybrid Search** (`backend/app/services/retriever.py`):
+    Use Qdrant's Query API and Reciprocal Rank Fusion (RRF) for multi-path recall.
 
     ```python
-    # 1. 对重写后的 Query 提取向量
+    # 1. Extract vectors for rewritten Query
     query_emb = model.encode([rewritten_query], return_dense=True, return_sparse=True)
     q_dense = query_emb['dense_vecs'][0].tolist()
     q_sparse_dict = query_emb['lexical_weights'][0]
-    
-    # 2. Qdrant RRF 混合检索
+
+    # 2. Qdrant RRF hybrid retrieval
     results = client.query_points(
         collection_name="financial_reports",
         prefetch=[
             models.Prefetch(
                 query=models.SparseVector(
-                    indices=list(q_sparse_dict.keys()), 
+                    indices=list(q_sparse_dict.keys()),
                     values=list(q_sparse_dict.values())
                 ),
                 using="sparse",
@@ -223,102 +223,102 @@ class DocumentSchema(BaseModel):
     )
     ```
 
-3.  **页面级块绑定 (Chunk Bundling)** (`backend/app/services/retriever.py`)：
-    提取 `results` 中的 `payload`，按 `page_start` 排序。检测连续页码，将连续的 Chunk 拼接为一个复合上下文块 (Bundled Context)。
+3.  **Page-level Chunk Bundling** (`backend/app/services/retriever.py`):
+    Extract `payload` from `results`, sort by `page_start`. Detect consecutive page numbers, concatenate consecutive Chunks into a composite context block (Bundled Context).
 
-### 4.3 重排序与生成管道 (Re-ranking & Generation Pipeline)
+### 4.3 Re-ranking & Generation Pipeline
 
-**目标**：ColBERT 实时计算，Cross-Encoder 深度打分，LLM 最终生成。
+**Goal**: ColBERT real-time computation, Cross-Encoder deep scoring, LLM final generation.
 
-1.  **一级重排序 (ColBERT MaxSim)** (`backend/app/services/reranker.py`)：
-    对上一步得到的 50-80 个 Bundled Contexts 实时计算 ColBERT 向量。
+1.  **First-stage Re-ranking (ColBERT MaxSim)** (`backend/app/services/reranker.py`):
+    Real-time compute ColBERT vectors for 50-80 Bundled Contexts obtained in previous step.
 
     ```python
-    # 提取 Query 的 ColBERT 向量
+    # Extract Query's ColBERT vector
     q_colbert = model.encode([rewritten_query], return_colbert_vecs=True)['colbert_vecs'][0]
-    
-    # 提取 Contexts 的 ColBERT 向量并打分
+
+    # Extract Contexts' ColBERT vectors and score
     ctx_colberts = model.encode(contexts, return_colbert_vecs=True)['colbert_vecs']
-    
+
     scores = []
     for ctx_colbert in ctx_colberts:
         score = model.colbert_score(q_colbert, ctx_colbert)
         scores.append(score)
-    
-    # 根据 scores 筛选 Top-10
+
+    # Filter Top-10 based on scores
     ```
 
-2.  **二级重排序 (Cross-Encoder)** (`backend/app/services/reranker.py`)：
-    使用 `bge-reranker-v2-gemma` 对 Top-10 进行极限精排。
+2.  **Second-stage Re-ranking (Cross-Encoder)** (`backend/app/services/reranker.py`):
+    Use `bge-reranker-v2-gemma` for ultimate precision ranking on Top-10.
 
     ```python
     from FlagEmbedding import FlagLLMReranker
     reranker = FlagLLMReranker('BAAI/bge-reranker-v2-gemma', use_fp16=True)
-    
+
     pairs = [[rewritten_query, ctx] for ctx in top_10_contexts]
     rerank_scores = reranker.compute_score(pairs)
-    
-    # 筛选 Top-3 作为最终上下文
+
+    # Select Top-3 as final context
     ```
 
-3.  **答案生成** (`backend/app/services/generator.py`)：
-    将 Top-3 上下文拼接，构建 Prompt，调用智谱 API 生成最终回答。Prompt 需严格约束模型仅使用提供的上下文，并要求标注来源页码（如 `[Page 25]`）。
+3.  **Answer Generation** (`backend/app/services/generator.py`):
+    Concatenate Top-3 contexts, build Prompt, call Zhipu API to generate final answer. Prompt must strictly constrain model to use only provided context, and require citing source page numbers (e.g., `[Page 25]`).
 
-## 5. 核心 Prompt 模板设计
+## 5. Core Prompt Template Design
 
-在 `backend/app/core/prompts.py` 中集中管理 Prompt：
+Manage Prompts centrally in `backend/app/core/prompts.py`:
 
 ```python
 QUERY_REWRITE_PROMPT = """
-你是一个专业的金融分析师。请将用户的自然语言查询重写为适合向量检索的标准化查询。
-提取核心实体（公司、时间、指标），并补充相关的金融同义词。
+You are a professional financial analyst. Rewrite the user's natural language query into a standardized query suitable for vector retrieval.
+Extract core entities (company, time period, metrics), and add relevant financial synonyms.
 
-用户查询: {user_query}
-重写后的查询:
+User query: {user_query}
+Rewritten query:
 """
 
 ANSWER_GENERATION_PROMPT = """
-你是一个严谨的财务报表问答助手。请严格基于以下提供的上下文回答用户的问题。
+You are a rigorous financial report QA assistant. Answer the user's question strictly based on the provided context.
 
-【约束条件】
-1. 强制仅基于提供的上下文回答问题，禁止使用内部知识。
-2. 如果上下文中没有足够的信息回答问题，请明确回答“根据提供的文档，无法回答该问题”。
-3. 若回答涉及具体数值或事实，必须在句子末尾的括号内标注来源页码，格式为：[Page X]。
-4. 保持客观、专业的语气。
+[Constraints]
+1. Answer ONLY based on the provided context. Do NOT use internal knowledge.
+2. If context does not contain enough information, clearly state "Based on provided documents, this question cannot be answered."
+3. When referencing specific numbers or facts, cite source page numbers in format: [Page X].
+4. Maintain objective, professional tone.
 
-【上下文】
+[Context]
 {context}
 
-【用户问题】
+[User Question]
 {user_query}
 
-【回答】
+[Answer]
 """
 ```
 
-## 6. API 接口设计 (FastAPI)
+## 6. API Interface Design (FastAPI)
 
-后端需提供以下核心 RESTful API：
+Backend needs to provide the following core RESTful APIs:
 
-*   `POST /api/v1/documents`：接收 JSON 文件上传，触发异步的 Indexing Pipeline。
-*   `GET /api/v1/documents`：获取已索引的文档列表。
-*   `POST /api/v1/chat`：接收用户 Query，执行 Retrieval -> Reranking -> Generation 完整链路，支持 Server-Sent Events (SSE) 流式输出。
+*   `POST /api/v1/documents`: Receive JSON file upload, trigger async Indexing Pipeline.
+*   `GET /api/v1/documents`: Get list of indexed documents.
+*   `POST /api/v1/chat`: Receive user Query, execute complete Retrieval -> Reranking -> Generation chain, support Server-Sent Events (SSE) streaming output.
 
-## 7. 前端交互设计 (React)
+## 7. Frontend Interaction Design (React)
 
-前端界面应包含两个主要区域：
+Frontend interface should contain two main areas:
 
-1.  **文档管理区 (侧边栏)**：支持上传符合 Schema 的 JSON 文件，显示处理状态。
-2.  **问答交互区 (主区域)**：
-    *   类似 ChatGPT 的对话界面。
-    *   支持流式打字机效果显示回答。
-    *   **关键特性**：当回答中包含引用页码（如 `[Page 25]`）时，前端应将其渲染为可点击的 Badge。点击后，在侧边栏或弹窗中展示该页对应的原始 Chunk 内容（包括表格数据），以增强可解释性。
+1.  **Document Management Area (Sidebar)**: Support uploading JSON files conforming to Schema, display processing status.
+2.  **Q&A Interaction Area (Main Area)**:
+    *   ChatGPT-like conversation interface.
+    *   Support streaming typewriter effect for answer display.
+    *   **Key Feature**: When answer contains citation page numbers (e.g., `[Page 25]`), frontend should render them as clickable Badges. On click, display corresponding original Chunk content (including table data) in sidebar or popup, to enhance explainability.
 
-## 8. 部署与运行建议
+## 8. Deployment & Running Recommendations
 
-*   **环境隔离**：建议使用 `uv` 或 `poetry` 管理 Python 依赖。
-*   **模型下载**：在首次启动前，编写脚本预先从 Hugging Face 下载 `bge-m3` 和 `bge-reranker-v2-gemma` 模型至本地缓存。
-*   **硬件要求**：由于包含本地 LLM Reranker 和 BGE-M3，建议在配备至少 16GB 显存的 GPU 环境下运行（如 RTX 4080/4090 或 A10G）。
+*   **Environment Isolation**: Recommend using `uv` or `poetry` for Python dependency management.
+*   **Model Download**: Before first startup, write script to pre-download `bge-m3` and `bge-reranker-v2-gemma` models from Hugging Face to local cache.
+*   **Hardware Requirements**: Due to local LLM Reranker and BGE-M3, recommend running in GPU environment with at least 16GB VRAM (e.g., RTX 4080/4090 or A10G).
 
 ## References
 
@@ -328,4 +328,4 @@ ANSWER_GENERATION_PROMPT = """
 [4] ZhipuAI Python SDK. https://github.com/MetaGLM/zhipuai-sdk-python-v4
 
 ---
-*本文档由 Manus AI 自动生成，专为 Claude Code 工程实现提供架构指导。*
+*This document was automatically generated by Manus AI, specifically for providing architectural guidance for Claude Code engineering implementation.*

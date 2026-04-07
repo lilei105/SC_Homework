@@ -60,13 +60,32 @@ class MetadataExtractor:
 
             result_text = response.choices[0].message.content.strip()
 
-            # Extract JSON
-            if "```json" in result_text:
-                result_text = re.search(r'```json\s*(.*?)\s*```', result_text, re.DOTALL).group(1)
-            elif "```" in result_text:
-                result_text = re.search(r'```\s*(.*?)\s*```', result_text, re.DOTALL).group(1)
+            # Extract JSON from code fences or raw text
+            json_text = None
 
-            result = json.loads(result_text)
+            # Try to extract from code fences first
+            if "```json" in result_text:
+                match = re.search(r'```json\s*(.*?)\s*```', result_text, re.DOTALL)
+                if match:
+                    json_text = match.group(1).strip()
+            elif "```" in result_text:
+                match = re.search(r'```\s*(.*?)\s*```', result_text, re.DOTALL)
+                if match:
+                    json_text = match.group(1).strip()
+
+            # If no code fences found, try to extract raw JSON
+            if json_text is None:
+                json_text = result_text.strip()
+                # Find the first { and last } to extract just the JSON part
+                start_idx = json_text.find('{')
+                end_idx = json_text.rfind('}')
+                if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                    json_text = json_text[start_idx:end_idx+1]
+                else:
+                    logger.error(f"No valid JSON found in response: {result_text[:200]}")
+                    raise ValueError("No valid JSON in response")
+
+            result = json.loads(json_text)
 
             # Ensure required structure
             return {

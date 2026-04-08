@@ -171,6 +171,7 @@ def list_documents() -> List[dict]:
         result.append({
             "document_id": doc_id,
             "source_file": doc.get("source_file") or status.source_file,
+            "company_name": doc.get("company_name", "Unknown"),
             "report_type": doc.get("report_type"),
             "report_title": doc.get("report_title"),
             "language": doc.get("language"),

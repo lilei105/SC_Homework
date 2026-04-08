@@ -49,7 +49,7 @@ export default function DocList({ documents, statuses, currentDocId, onSelect }:
               }`}
             >
               <div className="font-medium text-sm truncate flex items-center gap-2">
-                {doc.company_name}
+                {doc.report_title || doc.company_name}
                 {status?.file_type === 'pdf' && (
                   <span className="text-xs bg-orange-600 text-white px-1.5 py-0.5 rounded">PDF</span>
                 )}

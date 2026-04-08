@@ -25,6 +25,9 @@ backend/data/document_status.json
 !backend/data/uploads/.gitkeep
 !backend/data/qdrant_storage/.gitkeep
 
+# Claude Code
+.claude/
+
 # IDE
 .idea/
 .vscode/

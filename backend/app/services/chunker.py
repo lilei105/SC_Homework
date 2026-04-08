@@ -119,14 +119,8 @@ Output the title:"""
         """
         system_prompt = """You are a document structure analyzer. Determine if this page is a table of contents (TOC) page.
 
-If it is a TOC page, extract the section structure and output JSON:
-{
-  "is_toc": true,
-  "sections": [
-    {"title": "Strategic report", "level": 1},
-    {"title": "Who we are", "page": 2, "level": 2}
-  ]
-}
+If it is a TOC page, extract up to 30 section entries and output JSON:
+{"is_toc": true, "sections": [{"title": "Strategic report", "level": 1}, {"title": "Who we are", "page": 2, "level": 2}]}
 
 If it is NOT a TOC page, output:
 {"is_toc": false, "sections": []}
@@ -135,7 +129,8 @@ Rules:
 - level 1 = Major sections (titles without page numbers)
 - level 2 = Specific section entries (lines with page numbers)
 - page is an integer
-- Output ONLY JSON, nothing else"""
+- Output ONLY valid JSON on a single line, no markdown, no code blocks
+- Maximum 30 sections"""
 
         user_prompt = f"""Determine if the following content is a table of contents page:
 
@@ -171,7 +166,15 @@ Output JSON:"""
             if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
                 result_text = result_text[start_idx:end_idx+1]
 
-            result = json.loads(result_text)
+            # Try to parse, attempt fix on failure
+            try:
+                result = json.loads(result_text)
+            except json.JSONDecodeError:
+                # Try truncating to last valid } before the error point
+                logger.warning(f"JSON parse failed, attempting repair for page {page_num}")
+                # Remove trailing commas before } or ]
+                result_text = re.sub(r',\s*([}\]])', r'\1', result_text)
+                result = json.loads(result_text)
             is_toc = result.get("is_toc", False)
             sections = result.get("sections", [])
 

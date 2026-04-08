@@ -1,7 +1,11 @@
+import logging
+import time
 from openai import OpenAI
 from app.core.config import get_settings
 from typing import Optional, List
 import asyncio
+
+logger = logging.getLogger(__name__)
 
 _settings = get_settings()
 
@@ -23,17 +27,56 @@ def chat_completion(
     temperature: float = 0.7,
     max_tokens: int = 2048,
 ) -> str:
-    """Synchronous chat completion."""
+    """Synchronous chat completion with thinking mode enabled."""
     client = get_llm_client()
+    model = _settings.llm_model
 
-    response = client.chat.completions.create(
-        model=_settings.llm_model,
+    logger.info(f"[LLM] Calling {model} (non-stream, thinking enabled)")
+    t0 = time.time()
+
+    # Use streaming to capture reasoning content
+    stream = client.chat.completions.create(
+        model=model,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
+        stream=True,
+        stream_options={"include_usage": True},
+        extra_body={"enable_thinking": True},
     )
 
-    return response.choices[0].message.content
+    reasoning_content = ""
+    answer_content = ""
+
+    for chunk in stream:
+        if not chunk.choices:
+            # Usage info
+            if chunk.usage:
+                logger.info(f"[LLM] Token usage: prompt={chunk.usage.prompt_tokens}, completion={chunk.usage.completion_tokens}, total={chunk.usage.total_tokens}")
+            continue
+
+        delta = chunk.choices[0].delta
+
+        # Collect reasoning
+        if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+            reasoning_content += delta.reasoning_content
+
+        # Collect answer
+        if hasattr(delta, "content") and delta.content:
+            answer_content += delta.content
+
+    elapsed = time.time() - t0
+
+    # Log reasoning summary
+    if reasoning_content:
+        reasoning_preview = reasoning_content[:300].replace("\n", " ")
+        logger.info(f"[LLM] Thinking ({len(reasoning_content)} chars, {elapsed:.1f}s): {reasoning_preview}...")
+    else:
+        logger.info(f"[LLM] No thinking content ({elapsed:.1f}s)")
+
+    logger.info(f"[LLM] Answer ({len(answer_content)} chars): {answer_content[:200]}...")
+
+    return answer_content
 
 
 def chat_completion_stream(
@@ -41,20 +84,46 @@ def chat_completion_stream(
     temperature: float = 0.7,
     max_tokens: int = 2048
 ):
-    """Streaming chat completion."""
+    """Streaming chat completion with thinking mode enabled."""
     client = get_llm_client()
+    model = _settings.llm_model
 
-    response = client.chat.completions.create(
-        model=_settings.llm_model,
+    logger.info(f"[LLM] Calling {model} (stream, thinking enabled)")
+
+    stream = client.chat.completions.create(
+        model=model,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
         stream=True,
+        stream_options={"include_usage": True},
+        extra_body={"enable_thinking": True},
     )
 
-    for chunk in response:
-        if chunk.choices and chunk.choices[0].delta.content:
-            yield chunk.choices[0].delta.content
+    reasoning_content = ""
+    is_answering = False
+
+    for chunk in stream:
+        if not chunk.choices:
+            if chunk.usage:
+                logger.info(f"[LLM] Token usage: prompt={chunk.usage.prompt_tokens}, completion={chunk.usage.completion_tokens}, total={chunk.usage.total_tokens}")
+            continue
+
+        delta = chunk.choices[0].delta
+
+        # Collect and log reasoning
+        if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+            reasoning_content += delta.reasoning_content
+
+        # Start yielding answer content
+        if hasattr(delta, "content") and delta.content:
+            if not is_answering:
+                # Log reasoning summary before first answer token
+                if reasoning_content:
+                    reasoning_preview = reasoning_content[:300].replace("\n", " ")
+                    logger.info(f"[LLM] Thinking done ({len(reasoning_content)} chars): {reasoning_preview}...")
+                is_answering = True
+            yield delta.content
 
 
 async def chat_completion_async(

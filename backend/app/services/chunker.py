@@ -22,6 +22,7 @@ from app.models.schemas import (
     PeriodInfo, Entities, Flags, Relations, ParserInfo
 )
 from app.core.config import get_settings
+from app.services.llm_client import chat_completion
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +31,7 @@ class DocumentChunker:
     """文档切分服务"""
 
     def __init__(self):
-        settings = get_settings()
-        self.llm_client = OpenAI(
-            api_key=settings.dashscope_api_key,
-            base_url=settings.dashscope_base_url
-        )
-        self.llm_model = settings.llm_model
+        pass
 
     def parse_pages(self, markdown_content: str) -> Dict[int, str]:
         """
@@ -97,18 +93,16 @@ Rules:
 Output the title:"""
 
         try:
-            response = self.llm_client.chat.completions.create(
-                model=self.llm_model,
+            result = chat_completion(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.1,
+                max_tokens=256,
             )
 
-            title = response.choices[0].message.content.strip()
-            # 清理可能的引号
-            title = title.strip('"\'')
+            title = result.strip().strip('"\'')
             logger.info(f"Generated title: {title}")
             return title
 
@@ -152,22 +146,30 @@ Rules:
 Output JSON:"""
 
         try:
-            response = self.llm_client.chat.completions.create(
-                model=self.llm_model,
+            result_text = chat_completion(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.1,
+                max_tokens=1024,
             )
-
-            result_text = response.choices[0].message.content.strip()
 
             # 提取 JSON
             if "```json" in result_text:
-                result_text = re.search(r'```json\s*(.*?)\s*```', result_text, re.DOTALL).group(1)
+                match = re.search(r'```json\s*(.*?)\s*```', result_text, re.DOTALL)
+                if match:
+                    result_text = match.group(1)
             elif "```" in result_text:
-                result_text = re.search(r'```\s*(.*?)\s*```', result_text, re.DOTALL).group(1)
+                match = re.search(r'```\s*(.*?)\s*```', result_text, re.DOTALL)
+                if match:
+                    result_text = match.group(1)
+
+            # Fallback: find raw JSON
+            start_idx = result_text.find('{')
+            end_idx = result_text.rfind('}')
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                result_text = result_text[start_idx:end_idx+1]
 
             result = json.loads(result_text)
             is_toc = result.get("is_toc", False)

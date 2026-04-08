@@ -7,24 +7,16 @@ import json
 import logging
 import re
 from typing import List, Dict, Any, Optional
-from openai import OpenAI
 
 from app.core.config import get_settings
 from app.core.prompts import CHUNK_METADATA_EXTRACTION_PROMPT
+from app.services.llm_client import chat_completion
 
 logger = logging.getLogger(__name__)
 
 
 class MetadataExtractor:
     """Extract metadata from document chunks using LLM"""
-
-    def __init__(self):
-        settings = get_settings()
-        self.llm_client = OpenAI(
-            api_key=settings.dashscope_api_key,
-            base_url=settings.dashscope_base_url
-        )
-        self.llm_model = settings.llm_model
 
     def extract_chunk_metadata(
         self,
@@ -52,16 +44,11 @@ class MetadataExtractor:
         )
 
         try:
-            logger.debug(f"[LLM] Calling model {self.llm_model} for metadata extraction...")
-            response = self.llm_client.chat.completions.create(
-                model=self.llm_model,
+            result_text = chat_completion(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
+                max_tokens=1024,
             )
-            logger.debug(f"[LLM] Got response from model")
-
-            result_text = response.choices[0].message.content.strip()
-            logger.debug(f"[LLM] Response text (first 500 chars): {result_text[:500]}")
 
             # Extract JSON from code fences or raw text
             json_text = None

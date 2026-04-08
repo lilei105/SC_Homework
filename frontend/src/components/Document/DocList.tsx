@@ -1,5 +1,11 @@
 import type { Document, DocumentStatus } from '../../types'
 
+// Format report type for display
+const formatReportType = (type: string | undefined) => {
+  if (!type) return ''
+  return type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
 // Status label mapping
 const statusLabels: Record<string, { text: string; color: string }> = {
   pending: { text: 'Pending', color: 'text-gray-400' },
@@ -55,7 +61,11 @@ export default function DocList({ documents, statuses, currentDocId, onSelect }:
                 )}
               </div>
               <div className="text-xs text-gray-400 truncate mt-0.5">
-                {doc.fiscal_year} {doc.fiscal_period} · {doc.report_type}
+                {doc.company_name && doc.company_name !== 'Unknown' && (
+                  <>{doc.company_name} · </>
+                )}
+                {doc.fiscal_year} {doc.fiscal_period} · {formatReportType(doc.report_type)}
+                {doc.currency && doc.currency !== 'USD' && ` · ${doc.currency}`}
               </div>
               {status && status.status !== 'completed' && (
                 <div className="mt-2">

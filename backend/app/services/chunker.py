@@ -26,12 +26,31 @@ from app.services.llm_client import chat_completion
 
 logger = logging.getLogger(__name__)
 
+# Page marker: injected at content boundaries to track which page text belongs to.
+# Null byte (\x00) never appears in OCR output. Only used in memory, stripped before storage.
+PAGE_MARKER = "\x00"
+
 
 class DocumentChunker:
     """文档切分服务"""
 
     def __init__(self):
         pass
+
+    def _inject_page_marker(self, page_num: int, text: str) -> str:
+        """Wrap page content with page number markers."""
+        return f"{PAGE_MARKER}{page_num}{PAGE_MARKER}{text}"
+
+    def _extract_page_range(self, content: str) -> Tuple[Optional[int], Optional[int]]:
+        """Extract min/max page numbers from page markers in content."""
+        pages = [int(m) for m in re.findall(f'{PAGE_MARKER}(\\d+){PAGE_MARKER}', content)]
+        if not pages:
+            return (None, None)
+        return (min(pages), max(pages))
+
+    def _strip_markers(self, content: str) -> str:
+        """Remove page markers from content before storage."""
+        return re.sub(f'{PAGE_MARKER}\\d+{PAGE_MARKER}', '', content).strip()
 
     def parse_pages(self, markdown_content: str) -> Dict[int, str]:
         """
@@ -298,7 +317,7 @@ Output JSON:"""
             if page_start is not None:
                 for p in range(page_start, page_end + 1):
                     if p in page_dict:
-                        content_parts.append(page_dict[p])
+                        content_parts.append(self._inject_page_marker(p, page_dict[p]))
 
             content = "\n\n".join(content_parts)
 
@@ -392,11 +411,12 @@ Output JSON:"""
 
         if tokens <= max_tokens:
             # 不需要切分
+            p_start, p_end = self._extract_page_range(content)
             chunks.append({
                 "section_path": section_path,
-                "page_start": page_start,
-                "page_end": page_end,
-                "content": content,
+                "page_start": p_start or page_start,
+                "page_end": p_end or page_end,
+                "content": self._strip_markers(content),
                 "tokens": tokens,
                 "chunk_type": section_type
             })
@@ -405,18 +425,18 @@ Output JSON:"""
             paragraphs = re.split(r'\n\n+', content)
             current_chunk = ""
             current_tokens = 0
-            chunk_start_page = page_start
 
             for para in paragraphs:
                 para_tokens = self.estimate_tokens(para)
 
                 if current_tokens + para_tokens > max_tokens and current_chunk:
-                    # 保存当前 chunk
+                    # 保存当前 chunk — 用 marker 算出精确页码
+                    p_start, p_end = self._extract_page_range(current_chunk)
                     chunks.append({
                         "section_path": section_path,
-                        "page_start": chunk_start_page,
-                        "page_end": page_end,  # 简化处理
-                        "content": current_chunk.strip(),
+                        "page_start": p_start or page_start,
+                        "page_end": p_end or page_end,
+                        "content": self._strip_markers(current_chunk),
                         "tokens": current_tokens,
                         "chunk_type": section_type
                     })
@@ -428,11 +448,12 @@ Output JSON:"""
 
             # 保存最后一个 chunk
             if current_chunk.strip():
+                p_start, p_end = self._extract_page_range(current_chunk)
                 chunks.append({
                     "section_path": section_path,
-                    "page_start": chunk_start_page,
-                    "page_end": page_end,
-                    "content": current_chunk.strip(),
+                    "page_start": p_start or page_start,
+                    "page_end": p_end or page_end,
+                    "content": self._strip_markers(current_chunk),
                     "tokens": current_tokens,
                     "chunk_type": section_type
                 })

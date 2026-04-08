@@ -119,8 +119,8 @@ def cross_encoder_rerank(
 def two_stage_rerank(
     query: str,
     contexts: List[Dict[str, Any]],
-    colbert_top_k: int = 10,
-    final_top_k: int = 3
+    colbert_top_k: int = 20,
+    final_top_k: int = 7
 ) -> List[Dict[str, Any]]:
     """
     Two-stage reranking: ColBERT -> Cross-Encoder.

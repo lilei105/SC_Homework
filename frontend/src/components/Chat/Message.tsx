@@ -10,8 +10,8 @@ export default function Message({ message, onCitationClick }: MessageProps) {
   const isUser = message.role === 'user'
 
   const renderContent = (content: string) => {
-    // Match [Page X] pattern for citations
-    const citationRegex = /\[Page\s+(\d+)\]/g
+    // Match [Source N] pattern for citations (case-insensitive)
+    const citationRegex = /\[Source\s+(\d+)\]/gi
     const parts: React.ReactNode[] = []
     let lastIndex = 0
     let match
@@ -25,8 +25,8 @@ export default function Message({ message, onCitationClick }: MessageProps) {
         )
       }
 
-      const pageNum = parseInt(match[1])
-      const citation = message.citations?.find((c) => c.page === pageNum)
+      const sourceNum = parseInt(match[1])
+      const citation = message.citations?.find((c) => c.source_num === sourceNum)
 
       if (citation) {
         parts.push(
@@ -34,14 +34,15 @@ export default function Message({ message, onCitationClick }: MessageProps) {
             key={key++}
             onClick={() => onCitationClick(citation)}
             className="inline-flex items-center px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded hover:bg-blue-200 cursor-pointer"
+            title={citation.section_title || ''}
           >
-            Page {pageNum}
+            {citation.page_label || `Source ${sourceNum}`}
           </button>
         )
       } else {
         parts.push(
           <span key={key++} className="text-xs text-gray-500 bg-gray-100 px-1 py-0.5 rounded">
-            [Page {pageNum}]
+            [Source {sourceNum}]
           </span>
         )
       }

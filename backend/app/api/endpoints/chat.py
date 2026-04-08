@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query
 from sse_starlette.sse import EventSourceResponse
 from app.models.schemas import ChatRequest
-from app.services.retriever import retrieve_chunks, bundle_chunks
+from app.services.retriever import retrieve_chunks
 from app.services.reranker import two_stage_rerank
 from app.services.generator import generate_answer
 from app.api.endpoints.documents import _documents, _document_status
@@ -37,11 +37,8 @@ async def chat_stream(
                 yield json.dumps({"type": "error", "message": "No relevant content found"})
                 return
 
-            # 2. Bundle consecutive chunks
-            bundles = bundle_chunks(chunks)
-
-            # 3. Two-stage reranking
-            top_contexts = two_stage_rerank(query, bundles)
+            # 2. Two-stage reranking on individual chunks
+            top_contexts = two_stage_rerank(query, chunks)
 
             if not top_contexts:
                 yield json.dumps({"type": "error", "message": "No relevant content after reranking"})
@@ -59,9 +56,12 @@ async def chat_stream(
                         citations.append(cit)
                         yield json.dumps({
                             "type": "citation",
-                            "page": cit["page"],
+                            "source_num": cit["source_num"],
+                            "page_label": cit.get("page_label", ""),
+                            "page_start": cit.get("page_start"),
+                            "page_end": cit.get("page_end"),
                             "chunk_id": cit.get("chunk_id"),
-                            "content": cit.get("content", "")[:500] if cit.get("content") else None,
+                            "content": cit.get("content", ""),
                             "section_title": cit.get("section_title", ""),
                         })
 

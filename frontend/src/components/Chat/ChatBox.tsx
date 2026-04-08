@@ -58,7 +58,10 @@ export default function ChatBox({ documentId, messages, isLoading, onSend }: Cha
       {selectedCitation && (
         <div className="w-96 border-l border-gray-200 bg-gray-50 p-4 overflow-y-auto">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="font-medium">Source (Page {selectedCitation.page})</h3>
+            <h3 className="font-medium">
+              Source {selectedCitation.source_num}
+              {selectedCitation.page_label && ` (${selectedCitation.page_label})`}
+            </h3>
             <button
               onClick={() => {
                 setSelectedCitation(null)

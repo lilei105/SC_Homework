@@ -1,6 +1,7 @@
 from app.services.llm_client import generate_answer_stream
 from app.core.prompts import ANSWER_GENERATION_PROMPT
 from typing import List, Dict, Any, Generator, Tuple
+import re
 
 
 def format_context(contexts: List[Dict[str, Any]]) -> str:
@@ -26,40 +27,14 @@ def format_context(contexts: List[Dict[str, Any]]) -> str:
     return "\n\n".join(formatted)
 
 
-def build_page_to_context_map(contexts: List[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
-    """Build a mapping from every page number to its context info."""
-    page_map = {}
-    for ctx in contexts:
-        page_start = ctx.get('page_start')
-        page_end = ctx.get('page_end', page_start)
-        if page_start is None:
-            continue
-
-        chunk_id = ctx.get('chunk_ids', [ctx.get('chunk_id')])[0] if ctx.get('chunk_ids') else ctx.get('chunk_id')
-        content = ctx.get('content', '')
-
-        # Map every page in the range
-        for page in range(page_start, (page_end or page_start) + 1):
-            page_map[page] = {
-                'chunk_id': chunk_id,
-                'content': content,
-                'section_title': ctx.get('section_title', ''),
-                'page_start': page_start,
-                'page_end': page_end,
-            }
-
-    return page_map
-
-
 def extract_citations(text: str) -> List[int]:
-    """Extract page numbers from [Page X] patterns in text."""
-    import re
-    pages = []
-    for match in re.finditer(r'\[Page\s+(\d+)\]', text):
-        page = int(match.group(1))
-        if page not in pages:
-            pages.append(page)
-    return pages
+    """Extract source numbers from [Source N] patterns in text."""
+    sources = []
+    for match in re.finditer(r'\[Source\s+(\d+)\]', text, re.IGNORECASE):
+        source_num = int(match.group(1))
+        if source_num not in sources:
+            sources.append(source_num)
+    return sources
 
 
 def generate_answer(
@@ -70,30 +45,48 @@ def generate_answer(
     Generate answer with streaming and citations.
 
     Yields:
-        Tuple of (token, citations) where citations is updated list
+        Tuple of (token, citations) where citations is updated list.
+        Citations use [Source N] format, where N maps directly to the context index.
     """
     context_str = format_context(contexts)
-    page_to_ctx = build_page_to_context_map(contexts)
-
     accumulated_text = ""
     citations: List[Dict[str, Any]] = []
-    seen_pages: List[int] = []
+    seen_sources: List[int] = []
 
     for token in generate_answer_stream(query, context_str):
         accumulated_text += token
 
         # Check for new citations
-        cited_pages = extract_citations(accumulated_text)
-        for page in cited_pages:
-            if page not in seen_pages:
-                seen_pages.append(page)
-                ctx_info = page_to_ctx.get(page, {})
-                citations.append({
-                    'page': page,
-                    'chunk_id': ctx_info.get('chunk_id'),
-                    'content': ctx_info.get('content'),
-                    'section_title': ctx_info.get('section_title', ''),
-                })
+        cited_sources = extract_citations(accumulated_text)
+        for source_num in cited_sources:
+            if source_num not in seen_sources:
+                seen_sources.append(source_num)
+                # source_num is 1-indexed, contexts list is 0-indexed
+                ctx_idx = source_num - 1
+                if 0 <= ctx_idx < len(contexts):
+                    ctx = contexts[ctx_idx]
+                    page_start = ctx.get('page_start')
+                    page_end = ctx.get('page_end', page_start)
+                    chunk_id = ctx.get('chunk_ids', [ctx.get('chunk_id')])[0] if ctx.get('chunk_ids') else ctx.get('chunk_id')
+                    section_title = ctx.get('section_title', '')
+
+                    # Build a readable page label
+                    if page_start and page_end and page_start != page_end:
+                        page_label = f"Pages {page_start}-{page_end}"
+                    elif page_start:
+                        page_label = f"Page {page_start}"
+                    else:
+                        page_label = "Unknown"
+
+                    citations.append({
+                        'source_num': source_num,
+                        'page_start': page_start,
+                        'page_end': page_end,
+                        'page_label': page_label,
+                        'chunk_id': chunk_id,
+                        'content': ctx.get('content', ''),
+                        'section_title': section_title,
+                    })
 
         yield token, citations.copy()
 

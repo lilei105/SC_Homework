@@ -70,9 +70,13 @@ export function useChat(): UseChatReturn {
           )
         } else if (data.type === 'citation') {
             const citation: Citation = {
-              page: data.page,
+              source_num: data.source_num,
+              page_label: data.page_label || '',
+              page_start: data.page_start,
+              page_end: data.page_end,
               chunk_id: data.chunk_id,
               content: data.content,
+              section_title: data.section_title,
             }
             setMessages((prev) =>
               prev.map((msg) =>

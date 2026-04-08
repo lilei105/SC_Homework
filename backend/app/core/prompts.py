@@ -15,7 +15,7 @@ ANSWER_GENERATION_PROMPT = """You are a precise financial report QA assistant. A
 [Constraints]
 1. Answer ONLY based on the provided context. Do NOT use any internal knowledge or speculation.
 2. If the context does not contain enough information to answer the question, clearly state "Based on the provided documents, this question cannot be answered."
-3. When referencing specific numbers or facts, cite the source page number at the end of the sentence in the format: [Page X]
+3. When referencing specific numbers or facts, cite the source by its number at the end of the sentence in the format: [Source N] (where N matches the source number in the context).
 4. Maintain an objective, professional tone.
 5. When dealing with table data, ensure numerical accuracy.
 6. ALWAYS respond in English, regardless of the language used in the question or context.
@@ -33,7 +33,7 @@ ANSWER_GENERATION_PROMPT_WITH_CITATIONS = """You are a precise financial report 
 [Constraints]
 1. Answer ONLY based on the provided context. Do NOT use any internal knowledge or speculation.
 2. If the context does not contain enough information to answer the question, clearly state "Based on the provided documents, this question cannot be answered."
-3. Cite the source after each factual statement in the format [Page X]
+3. Cite the source by its number after each factual statement in the format [Source N] (where N matches the source number in the context).
 4. Maintain an objective, professional tone.
 5. When dealing with table data, ensure numerical accuracy.
 6. ALWAYS respond in English, regardless of the language used in the question or context.

@@ -52,6 +52,42 @@ class DocumentChunker:
         """Remove page markers from content before storage."""
         return re.sub(f'{PAGE_MARKER}\\d+{PAGE_MARKER}', '', content).strip()
 
+    def _split_and_tag_paragraphs(self, content: str) -> List[Tuple[int, str]]:
+        """
+        Split content by paragraphs and tag each with its page number.
+
+        Walks through paragraphs in order. When a PAGE_MARKER is found,
+        update current_page. Every paragraph gets tagged with the page
+        it belongs to, and markers are stripped from the text.
+
+        Returns:
+            List of (page_num, clean_text) tuples
+        """
+        paragraphs = re.split(r'\n\n+', content)
+        tagged = []
+        current_page = None
+        marker_pattern = re.compile(f'{PAGE_MARKER}(\\d+){PAGE_MARKER}')
+
+        for para in paragraphs:
+            text = para.strip()
+            if not text:
+                continue
+
+            # Check if this paragraph contains a page marker
+            markers = marker_pattern.findall(text)
+            if markers:
+                # Use the last marker (there should only be one at the start)
+                current_page = int(markers[-1])
+
+            # Strip markers from text
+            clean_text = marker_pattern.sub('', text).strip()
+            if not clean_text:
+                continue
+
+            tagged.append((current_page, clean_text))
+
+        return tagged
+
     def parse_pages(self, markdown_content: str) -> Dict[int, str]:
         """
         解析 Markdown 内容，按页分割
@@ -410,7 +446,7 @@ Output JSON:"""
         chunks = []
 
         if tokens <= max_tokens:
-            # 不需要切分
+            # 不需要切分 — 用 marker 算页码，去掉 marker 后存储
             p_start, p_end = self._extract_page_range(content)
             chunks.append({
                 "section_path": section_path,
@@ -421,39 +457,41 @@ Output JSON:"""
                 "chunk_type": section_type
             })
         else:
-            # 需要切分 - 按段落切分
-            paragraphs = re.split(r'\n\n+', content)
-            current_chunk = ""
+            # 需要切分 — 先拆分段落并标记每段的页码
+            tagged_paras = self._split_and_tag_paragraphs(content)
+
+            # 按 512 tokens 累积段落组装 chunk
+            current_paras: List[Tuple[int, str]] = []
             current_tokens = 0
 
-            for para in paragraphs:
-                para_tokens = self.estimate_tokens(para)
+            for page_num, para_text in tagged_paras:
+                para_tokens = self.estimate_tokens(para_text)
 
-                if current_tokens + para_tokens > max_tokens and current_chunk:
-                    # 保存当前 chunk — 用 marker 算出精确页码
-                    p_start, p_end = self._extract_page_range(current_chunk)
+                if current_tokens + para_tokens > max_tokens and current_paras:
+                    # 保存当前 chunk
+                    pages = [p for p, _ in current_paras if p is not None]
                     chunks.append({
                         "section_path": section_path,
-                        "page_start": p_start or page_start,
-                        "page_end": p_end or page_end,
-                        "content": self._strip_markers(current_chunk),
+                        "page_start": min(pages) if pages else page_start,
+                        "page_end": max(pages) if pages else page_end,
+                        "content": "\n\n".join(t for _, t in current_paras),
                         "tokens": current_tokens,
                         "chunk_type": section_type
                     })
-                    current_chunk = para
+                    current_paras = [(page_num, para_text)]
                     current_tokens = para_tokens
                 else:
-                    current_chunk += "\n\n" + para if current_chunk else para
+                    current_paras.append((page_num, para_text))
                     current_tokens += para_tokens
 
             # 保存最后一个 chunk
-            if current_chunk.strip():
-                p_start, p_end = self._extract_page_range(current_chunk)
+            if current_paras:
+                pages = [p for p, _ in current_paras if p is not None]
                 chunks.append({
                     "section_path": section_path,
-                    "page_start": p_start or page_start,
-                    "page_end": p_end or page_end,
-                    "content": self._strip_markers(current_chunk),
+                    "page_start": min(pages) if pages else page_start,
+                    "page_end": max(pages) if pages else page_end,
+                    "content": "\n\n".join(t for _, t in current_paras),
                     "tokens": current_tokens,
                     "chunk_type": section_type
                 })

@@ -69,7 +69,7 @@ def _load_persistence():
 
 
 def _restore_from_qdrant():
-    """Restore document metadata from Qdrant storage."""
+    """Restore document metadata from saved document.json files."""
     from app.utils.qdrant_client import get_qdrant_client
     from app.core.config import get_settings
 
@@ -101,7 +101,7 @@ def _restore_from_qdrant():
             if offset is None:
                 break
 
-        # Create status for each document
+        # Restore metadata for each document
         for doc_id, chunk_count in doc_chunks.items():
             if doc_id not in _document_status:
                 _document_status[doc_id] = DocumentStatus(
@@ -114,6 +114,33 @@ def _restore_from_qdrant():
                     created_at=datetime.now(),
                     updated_at=datetime.now()
                 )
+
+            # Load metadata from saved document.json if available
+            doc_json_path = DATA_PATH / "tasks" / doc_id / "document.json"
+            if doc_json_path.exists():
+                try:
+                    with open(doc_json_path, 'r', encoding='utf-8') as f:
+                        doc_data = json.load(f)
+                    doc_meta = doc_data.get("document", {})
+                    _documents[doc_id] = {
+                        "document_id": doc_id,
+                        "source_file": doc_meta.get("source_file", ""),
+                        "company_name": doc_meta.get("company_name", "Unknown"),
+                        "ticker": doc_meta.get("ticker"),
+                        "report_type": doc_meta.get("report_type", "annual_report"),
+                        "report_title": doc_meta.get("report_title", ""),
+                        "language": doc_meta.get("language", "en"),
+                        "currency": doc_meta.get("currency", "USD"),
+                        "fiscal_year": doc_meta.get("fiscal_year", 2025),
+                        "fiscal_period": doc_meta.get("fiscal_period", "FY"),
+                        "report_date": doc_meta.get("report_date"),
+                        "page_count": doc_meta.get("page_count"),
+                        "task_dir": f"tasks/{doc_id}",
+                    }
+                except Exception as e:
+                    logger.warning(f"Failed to load document.json for {doc_id}: {e}")
+                    _documents[doc_id] = {"document_id": doc_id}
+            else:
                 _documents[doc_id] = {"document_id": doc_id}
 
         logger.info(f"Restored {len(doc_chunks)} documents from Qdrant")

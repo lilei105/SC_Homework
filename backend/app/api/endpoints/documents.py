@@ -544,8 +544,11 @@ def _process_and_index_sync(
             "Extracting metadata...",
         )
 
-        # Start background metadata enrichment
-        enrich_chunk_metadata_task(document_id, doc_schema.chunks)
+        # Start background metadata enrichment (disabled for speed)
+        # enrich_chunk_metadata_task(document_id, doc_schema.chunks)
+
+        # Mark as completed directly
+        _update_status(document_id, "completed", None, indexed_chunks=len(doc_schema.chunks))
 
         logger.info(f"Indexed: {document_id} ({len(doc_schema.chunks)} chunks), starting metadata enrichment")
 

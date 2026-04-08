@@ -49,23 +49,23 @@ ANSWER_GENERATION_PROMPT_WITH_CITATIONS = """You are a precise financial report 
 CHUNK_METADATA_EXTRACTION_PROMPT = """Extract metadata from the following financial document chunk.
 
 Output JSON format:
-{
+{{
   "keywords": ["revenue", "net income", "FY2024"],
-  "period": {
+  "period": {{
     "fiscal_year": 2024,
     "fiscal_period": "FY",
     "date_label": "Fiscal Year 2024"
-  },
-  "entities": {
+  }},
+  "entities": {{
     "companies": ["Tesla Inc."],
     "products": ["Model Y", "Energy Storage"],
     "regions": ["North America", "China"],
     "people": ["Elon Musk"]
-  },
+  }},
   "financial_metrics": [
-    {"name": "Total Revenue", "value": "$96.77 billion", "normalized_value": 96770000000, "unit": "USD", "period_label": "FY2024"}
+    {{"name": "Total Revenue", "value": "$96.77 billion", "normalized_value": 96770000000, "unit": "USD", "period_label": "FY2024"}}
   ]
-}
+}}
 
 Rules:
 - keywords: 3-5 most important terms for search (financial terms, company names, metrics, time periods)

@@ -52,13 +52,16 @@ class MetadataExtractor:
         )
 
         try:
+            logger.debug(f"[LLM] Calling model {self.llm_model} for metadata extraction...")
             response = self.llm_client.chat.completions.create(
                 model=self.llm_model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
             )
+            logger.debug(f"[LLM] Got response from model")
 
             result_text = response.choices[0].message.content.strip()
+            logger.debug(f"[LLM] Response text (first 500 chars): {result_text[:500]}")
 
             # Extract JSON from code fences or raw text
             json_text = None
@@ -96,7 +99,7 @@ class MetadataExtractor:
             }
 
         except Exception as e:
-            logger.error(f"Failed to extract metadata: {e}")
+            logger.error(f"Failed to extract metadata: {type(e).__name__}: {e}")
             return {
                 "keywords": [],
                 "period": None,

@@ -599,7 +599,7 @@ def enrich_chunk_metadata_task(document_id: str, chunks: List):
                     logger.info(f"[ENRICH] Extracted metadata for chunk {chunk.chunk_id}")
 
                 except Exception as e:
-                    logger.error(f"[ENRICH] Failed to extract metadata for chunk {chunk.chunk_id}: {e}")
+                    logger.error(f"[ENRICH] Failed to extract metadata for chunk {chunk.chunk_id}: {type(e).__name__}: {e}")
 
             # Update progress
             _update_status(

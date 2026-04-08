@@ -320,6 +320,7 @@ async def _process_and_index_document(
 
         # Update document metadata
         _documents[document_id].update({
+            "company_name": doc_schema.document.company_name,
             "report_type": doc_schema.document.report_type,
             "report_title": doc_schema.document.report_title,
             "language": doc_schema.document.language,
@@ -500,6 +501,7 @@ def _process_and_index_sync(
 
         # Update document metadata
         _documents[document_id].update({
+            "company_name": doc_schema.document.company_name,
             "report_type": doc_schema.document.report_type,
             "report_title": doc_schema.document.report_title,
             "language": doc_schema.document.language,

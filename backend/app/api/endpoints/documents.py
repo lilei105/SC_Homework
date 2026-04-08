@@ -300,19 +300,11 @@ async def _process_and_index_document(
         from app.services.chunker import get_chunker
         chunker = get_chunker()
 
-        metadata = _documents.get(document_id, {})
         doc_schema, intermediate = chunker.process_markdown(
             markdown_content,
             {
                 "document_id": document_id,
                 "source_file": source_file,
-                "company_name": metadata.get("company_name", "Unknown"),
-                "report_type": metadata.get("report_type", "annual_report"),
-                "report_title": metadata.get("report_title", ""),
-                "language": metadata.get("language", "en"),
-                "currency": metadata.get("currency", "USD"),
-                "fiscal_year": metadata.get("fiscal_year", 2025),
-                "fiscal_period": metadata.get("fiscal_period", "FY"),
             },
             ocr_json_result=ocr_json_result,
             save_intermediate=task_dir
@@ -489,19 +481,11 @@ def _process_and_index_sync(
         from app.services.chunker import get_chunker
         chunker = get_chunker()
 
-        metadata = _documents.get(document_id, {})
         doc_schema, intermediate = chunker.process_markdown(
             markdown_content,
             {
                 "document_id": document_id,
                 "source_file": source_file,
-                "company_name": metadata.get("company_name", "Unknown"),
-                "report_type": metadata.get("report_type", "annual_report"),
-                "report_title": metadata.get("report_title", ""),
-                "language": metadata.get("language", "en"),
-                "currency": metadata.get("currency", "USD"),
-                "fiscal_year": metadata.get("fiscal_year", 2025),
-                "fiscal_period": metadata.get("fiscal_period", "FY"),
             },
             ocr_json_result=ocr_json_result,
             save_intermediate=task_dir

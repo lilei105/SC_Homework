@@ -90,7 +90,7 @@ export default function Sidebar({ currentDocId, onSelectDoc }: SidebarProps) {
   }
 
   return (
-    <aside className="w-72 bg-gray-800 text-white flex flex-col h-full">
+    <aside className="w-full bg-gray-800 text-white flex flex-col h-full">
       <div className="p-4 border-b border-gray-700">
         <h1 className="text-xl font-bold">Financial RAG</h1>
         <p className="text-xs text-gray-400 mt-1">财报智能问答系统</p>

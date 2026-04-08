@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import Sidebar from './components/Layout/Sidebar'
 import Header from './components/Layout/Header'
 import ChatBox from './components/Chat/ChatBox'
@@ -8,18 +8,29 @@ import { documentApi } from './services/api'
 function App() {
   const [currentDocId, setCurrentDocId] = useState<string | null>(null)
   const [currentDocTitle, setCurrentDocTitle] = useState<string | undefined>()
+  const [sidebarWidth, setSidebarWidth] = useState(288) // 288px = w-72
   const { messages, isLoading, sendMessage, error, reset } = useChat()
+  const isResizing = useRef(false)
 
-  useEffect(() => {
-    if (currentDocId) {
-      reset()
-      documentApi.get(currentDocId)
-        .then((doc) => setCurrentDocTitle(doc.report_title))
-        .catch(console.error)
-    } else {
-      setCurrentDocTitle(undefined)
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isResizing.current = true
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing.current) return
+      const newWidth = Math.max(200, Math.min(600, e.clientX))
+      setSidebarWidth(newWidth)
     }
-  }, [currentDocId, reset])
+
+    const handleMouseUp = () => {
+      isResizing.current = false
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [])
 
   const handleSelectDoc = (docId: string) => {
     setCurrentDocId(docId)
@@ -33,12 +44,20 @@ function App() {
 
   return (
     <div className="flex h-screen bg-gray-100">
-      <Sidebar
-        currentDocId={currentDocId}
-        onSelectDoc={handleSelectDoc}
+      <div style={{ width: sidebarWidth, minWidth: sidebarWidth }} className="flex-shrink-0">
+        <Sidebar
+          currentDocId={currentDocId}
+          onSelectDoc={handleSelectDoc}
+        />
+      </div>
+
+      {/* Resize handle */}
+      <div
+        onMouseDown={handleMouseDown}
+        className="w-1 cursor-col-resize bg-gray-200 hover:bg-blue-400 active:bg-blue-500 transition-colors flex-shrink-0"
       />
 
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         <Header documentTitle={currentDocTitle} />
 
         {error && (
@@ -58,8 +77,8 @@ function App() {
           ) : (
             <div className="flex items-center justify-center h-full text-gray-500">
               <div className="text-center">
-                <p className="text-xl mb-2">请选择或上传财报文档</p>
-                <p className="text-sm">支持 JSON 格式的结构化财报数据</p>
+                <p className="text-xl mb-2">Select or upload a financial report</p>
+                <p className="text-sm">Supports JSON format structured financial data</p>
               </div>
             </div>
           )}

@@ -61,54 +61,88 @@ class DocumentChunker:
             result_parts.append(page_dict[page_num])
         return "\n\n".join(result_parts)
 
-    def generate_document_title(self, page_dict: Dict[int, str]) -> str:
+    def generate_document_title(self, page_dict: Dict[int, str]) -> Dict[str, Any]:
         """
-        使用 LLM 从前两页内容生成文档标题
+        使用 LLM 从前两页内容生成文档标题和 document 级 metadata
 
         Returns:
-            生成的标题，如 "HSBC Holdings plc Annual Report 2025"
+            {"report_title": "...", "company_name": "...", "fiscal_year": 2025, ...}
         """
         # 提取前两页
         first_pages = []
         for page_num in sorted(page_dict.keys())[:2]:
-            first_pages.append(page_dict[page_num][:2000])  # 每页最多2000字符
+            first_pages.append(page_dict[page_num][:2000])
 
         content = "\n\n".join(first_pages)
 
-        system_prompt = """You are a document title generator. Generate a concise and accurate title based on the document content.
+        system_prompt = """You are a financial document analyzer. Extract document-level metadata from the following content.
+
+Output JSON with these fields:
+{"report_title": "Company Name + Report Type + Year", "company_name": "Official company name", "ticker": "STAN" or null, "report_type": "annual_report", "language": "en", "currency": "USD", "fiscal_year": 2025, "fiscal_period": "FY", "report_date": "2025-02-21" or null}
 
 Rules:
-- Title should include: Company Name + Report Type + Year
-- Keep company name in original language (usually English)
-- Report types: Annual Report, 10-K, Interim Report, etc.
-- Output ONLY the title, nothing else
-- Maximum 100 characters"""
+- report_title: concise title like "Standard Chartered Annual Report 2025", max 100 chars
+- company_name: official legal name from the document
+- report_type: one of annual_report, quarterly_report, 10k, 10q, interim_report, earnings_release
+- fiscal_period: FY for full year, Q1/Q2/Q3/Q4 for quarterly, H1/H2 for half-year
+- Output ONLY valid JSON on a single line, no markdown"""
 
-        user_prompt = f"""Generate a title for the following document:
+        user_prompt = f"""Extract metadata from the following document:
 
 ---
 {content[:4000]}
 ---
 
-Output the title:"""
+Output JSON:"""
 
         try:
-            result = chat_completion(
+            result_text = chat_completion(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.1,
-                max_tokens=256,
+                max_tokens=512,
             )
 
-            title = result.strip().strip('"\'')
-            logger.info(f"Generated title: {title}")
-            return title
+            # Extract JSON
+            start_idx = result_text.find('{')
+            end_idx = result_text.rfind('}')
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                result_text = result_text[start_idx:end_idx+1]
+
+            # Remove trailing commas
+            result_text = re.sub(r',\s*([}\]])', r'\1', result_text)
+
+            metadata = json.loads(result_text)
+            logger.info(f"Generated document metadata: {metadata}")
+
+            # Ensure required fields with defaults
+            return {
+                "report_title": metadata.get("report_title", "Financial Report"),
+                "company_name": metadata.get("company_name", "Unknown"),
+                "ticker": metadata.get("ticker"),
+                "report_type": metadata.get("report_type", "annual_report"),
+                "language": metadata.get("language", "en"),
+                "currency": metadata.get("currency", "USD"),
+                "fiscal_year": metadata.get("fiscal_year", 2025),
+                "fiscal_period": metadata.get("fiscal_period", "FY"),
+                "report_date": metadata.get("report_date"),
+            }
 
         except Exception as e:
-            logger.error(f"Failed to generate title: {e}")
-            return "Financial Report"
+            logger.error(f"Failed to generate document metadata: {e}")
+            return {
+                "report_title": "Financial Report",
+                "company_name": "Unknown",
+                "ticker": None,
+                "report_type": "annual_report",
+                "language": "en",
+                "currency": "USD",
+                "fiscal_year": 2025,
+                "fiscal_period": "FY",
+                "report_date": None,
+            }
 
     def check_page_for_toc(self, page_content: str, page_num: int) -> List[Dict[str, Any]]:
         """
@@ -462,9 +496,11 @@ Output JSON:"""
         logger.info(f"Extracted {len(toc_data)} TOC entries")
         intermediate["toc_data"] = toc_data
 
-        # 2.5 生成文档标题（如果没有提供）
-        if not document_metadata.get("report_title"):
-            document_metadata["report_title"] = self.generate_document_title(page_dict)
+        # 2.5 提取文档 metadata（标题、公司名、财年等）
+        llm_metadata = self.generate_document_title(page_dict)
+        for key, value in llm_metadata.items():
+            if not document_metadata.get(key):
+                document_metadata[key] = value
 
         # 3. 构建章节树
         sections = self.build_section_tree(toc_data, page_dict)

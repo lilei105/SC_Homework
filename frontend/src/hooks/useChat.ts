@@ -97,7 +97,7 @@ export function useChat(): UseChatReturn {
     }
 
     eventSource.onerror = () => {
-      setError('连接失败，请重试')
+      setError('Connection failed, please retry')
       eventSource.close()
       setIsLoading(false)
       eventSourceRef.current = null

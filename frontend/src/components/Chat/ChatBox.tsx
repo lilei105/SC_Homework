@@ -20,17 +20,9 @@ export default function ChatBox({ documentId, messages, isLoading, onSend }: Cha
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const handleCitationClick = async (citation: Citation) => {
+  const handleCitationClick = (citation: Citation) => {
     setSelectedCitation(citation)
-    if (citation.chunk_id) {
-      try {
-        const chunk = await documentApi.getChunk(documentId, citation.chunk_id)
-        setChunkContent(chunk.content)
-      } catch (e) {
-        console.error('Failed to fetch chunk:', e)
-        setChunkContent(citation.content || '无法加载原始内容')
-      }
-    }
+    setChunkContent(citation.content || 'No content available')
   }
 
   return (
@@ -39,8 +31,8 @@ export default function ChatBox({ documentId, messages, isLoading, onSend }: Cha
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 ? (
             <div className="text-center text-gray-500 mt-20">
-              <p className="text-lg mb-2">开始提问吧</p>
-              <p className="text-sm">例如：2024年第三季度营收是多少？</p>
+              <p className="text-lg mb-2">Ask a question</p>
+              <p className="text-sm">e.g., What was the Q3 2024 revenue?</p>
             </div>
           ) : (
             messages.map((msg) => (
@@ -54,7 +46,7 @@ export default function ChatBox({ documentId, messages, isLoading, onSend }: Cha
           {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content === '' && (
             <div className="flex items-center gap-2 text-gray-500">
               <div className="animate-spin w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full" />
-              思考中...
+              Thinking...
             </div>
           )}
           <div ref={messagesEndRef} />
@@ -66,7 +58,7 @@ export default function ChatBox({ documentId, messages, isLoading, onSend }: Cha
       {selectedCitation && (
         <div className="w-96 border-l border-gray-200 bg-gray-50 p-4 overflow-y-auto">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="font-medium">引用来源 (Page {selectedCitation.page})</h3>
+            <h3 className="font-medium">Source (Page {selectedCitation.page})</h3>
             <button
               onClick={() => {
                 setSelectedCitation(null)
@@ -78,7 +70,7 @@ export default function ChatBox({ documentId, messages, isLoading, onSend }: Cha
             </button>
           </div>
           <div className="text-sm text-gray-700 whitespace-pre-wrap">
-            {chunkContent || selectedCitation.content || '加载中...'}
+            {chunkContent || selectedCitation.content || 'Loading...'}
           </div>
         </div>
       )}

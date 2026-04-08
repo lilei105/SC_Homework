@@ -60,8 +60,9 @@ async def chat_stream(
                         yield json.dumps({
                             "type": "citation",
                             "page": cit["page"],
-                            "chunk_id": cit["chunk_id"],
-                            "content": cit["content"][:200] + "..." if cit.get("content") and len(cit["content"]) > 200 else cit.get("content")
+                            "chunk_id": cit.get("chunk_id"),
+                            "content": cit.get("content", "")[:500] if cit.get("content") else None,
+                            "section_title": cit.get("section_title", ""),
                         })
 
                 # Small delay for smoother streaming

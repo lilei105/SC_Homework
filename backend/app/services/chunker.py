@@ -119,7 +119,7 @@ Output the title:"""
         """
         system_prompt = """You are a document structure analyzer. Determine if this page is a table of contents (TOC) page.
 
-If it is a TOC page, extract up to 30 section entries and output JSON:
+If it is a TOC page, extract the section structure and output JSON:
 {"is_toc": true, "sections": [{"title": "Strategic report", "level": 1}, {"title": "Who we are", "page": 2, "level": 2}]}
 
 If it is NOT a TOC page, output:
@@ -129,8 +129,7 @@ Rules:
 - level 1 = Major sections (titles without page numbers)
 - level 2 = Specific section entries (lines with page numbers)
 - page is an integer
-- Output ONLY valid JSON on a single line, no markdown, no code blocks
-- Maximum 30 sections"""
+- Output ONLY valid JSON on a single line, no markdown, no code blocks"""
 
         user_prompt = f"""Determine if the following content is a table of contents page:
 

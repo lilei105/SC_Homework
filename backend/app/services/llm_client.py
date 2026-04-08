@@ -26,69 +26,89 @@ def chat_completion(
     messages: List[dict],
     temperature: float = 0.7,
     max_tokens: int = 2048,
+    enable_thinking: bool = False,
 ) -> str:
-    """Synchronous chat completion with thinking mode enabled."""
+    """Synchronous chat completion."""
     client = get_llm_client()
     model = _settings.llm_model
 
-    logger.info(f"[LLM] Calling {model} (non-stream, thinking enabled)")
+    mode = "thinking" if enable_thinking else "direct"
+    logger.info(f"[LLM] Calling {model} ({mode})")
     t0 = time.time()
 
-    # Use streaming to capture reasoning content
-    stream = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        stream=True,
-        stream_options={"include_usage": True},
-        extra_body={"enable_thinking": True},
-    )
+    if enable_thinking:
+        # Use streaming to capture reasoning content
+        stream = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stream=True,
+            stream_options={"include_usage": True},
+            extra_body={"enable_thinking": True},
+        )
 
-    reasoning_content = ""
-    answer_content = ""
+        reasoning_content = ""
+        answer_content = ""
 
-    for chunk in stream:
-        if not chunk.choices:
-            # Usage info
-            if chunk.usage:
-                logger.info(f"[LLM] Token usage: prompt={chunk.usage.prompt_tokens}, completion={chunk.usage.completion_tokens}, total={chunk.usage.total_tokens}")
-            continue
+        for chunk in stream:
+            if not chunk.choices:
+                if chunk.usage:
+                    logger.info(f"[LLM] Token usage: prompt={chunk.usage.prompt_tokens}, completion={chunk.usage.completion_tokens}, total={chunk.usage.total_tokens}")
+                continue
 
-        delta = chunk.choices[0].delta
+            delta = chunk.choices[0].delta
 
-        # Collect reasoning
-        if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-            reasoning_content += delta.reasoning_content
+            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                reasoning_content += delta.reasoning_content
 
-        # Collect answer
-        if hasattr(delta, "content") and delta.content:
-            answer_content += delta.content
+            if hasattr(delta, "content") and delta.content:
+                answer_content += delta.content
 
-    elapsed = time.time() - t0
+        elapsed = time.time() - t0
 
-    # Log reasoning summary
-    if reasoning_content:
-        reasoning_preview = reasoning_content[:300].replace("\n", " ")
-        logger.info(f"[LLM] Thinking ({len(reasoning_content)} chars, {elapsed:.1f}s): {reasoning_preview}...")
+        if reasoning_content:
+            reasoning_preview = reasoning_content[:300].replace("\n", " ")
+            logger.info(f"[LLM] Thinking ({len(reasoning_content)} chars, {elapsed:.1f}s): {reasoning_preview}...")
+        else:
+            logger.info(f"[LLM] No thinking content ({elapsed:.1f}s)")
+
+        logger.info(f"[LLM] Answer ({len(answer_content)} chars): {answer_content[:200]}...")
+
+        return answer_content
+
     else:
-        logger.info(f"[LLM] No thinking content ({elapsed:.1f}s)")
+        # Direct call, no thinking
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            extra_body={"enable_thinking": False},
+        )
 
-    logger.info(f"[LLM] Answer ({len(answer_content)} chars): {answer_content[:200]}...")
+        elapsed = time.time() - t0
+        answer_content = response.choices[0].message.content.strip()
 
-    return answer_content
+        if hasattr(response, 'usage') and response.usage:
+            logger.info(f"[LLM] Token usage: prompt={response.usage.prompt_tokens}, completion={response.usage.completion_tokens}, total={response.usage.total_tokens}")
+
+        logger.info(f"[LLM] Answer ({len(answer_content)} chars, {elapsed:.1f}s): {answer_content[:200]}...")
+
+        return answer_content
 
 
 def chat_completion_stream(
     messages: List[dict],
     temperature: float = 0.7,
-    max_tokens: int = 2048
+    max_tokens: int = 2048,
+    enable_thinking: bool = True,
 ):
     """Streaming chat completion with thinking mode enabled."""
     client = get_llm_client()
     model = _settings.llm_model
 
-    logger.info(f"[LLM] Calling {model} (stream, thinking enabled)")
+    logger.info(f"[LLM] Calling {model} (stream, thinking={'on' if enable_thinking else 'off'})")
 
     stream = client.chat.completions.create(
         model=model,
@@ -97,7 +117,7 @@ def chat_completion_stream(
         max_tokens=max_tokens,
         stream=True,
         stream_options={"include_usage": True},
-        extra_body={"enable_thinking": True},
+        extra_body={"enable_thinking": enable_thinking},
     )
 
     reasoning_content = ""
@@ -111,14 +131,11 @@ def chat_completion_stream(
 
         delta = chunk.choices[0].delta
 
-        # Collect and log reasoning
         if hasattr(delta, "reasoning_content") and delta.reasoning_content:
             reasoning_content += delta.reasoning_content
 
-        # Start yielding answer content
         if hasattr(delta, "content") and delta.content:
             if not is_answering:
-                # Log reasoning summary before first answer token
                 if reasoning_content:
                     reasoning_preview = reasoning_content[:300].replace("\n", " ")
                     logger.info(f"[LLM] Thinking done ({len(reasoning_content)} chars): {reasoning_preview}...")
@@ -129,13 +146,14 @@ def chat_completion_stream(
 async def chat_completion_async(
     messages: List[dict],
     temperature: float = 0.7,
-    max_tokens: int = 2048
+    max_tokens: int = 2048,
+    enable_thinking: bool = False,
 ) -> str:
     """Async wrapper for chat completion."""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(
         None,
-        lambda: chat_completion(messages, temperature, max_tokens)
+        lambda: chat_completion(messages, temperature, max_tokens, enable_thinking)
     )
 
 
@@ -147,7 +165,7 @@ def rewrite_query(user_query: str) -> str:
     response = chat_completion(
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
-        max_tokens=256
+        max_tokens=256,
     )
 
     return response.strip()
@@ -165,5 +183,6 @@ def generate_answer_stream(query: str, context: str):
     yield from chat_completion_stream(
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
-        max_tokens=2048
+        max_tokens=2048,
+        enable_thinking=True,
     )

@@ -16,6 +16,7 @@ from pathlib import Path
 from pathlib import Path
 
 from openai import OpenAI
+from html.parser import HTMLParser
 
 from app.models.schemas import (
     DocumentSchema, DocumentMetadata, Section, ChunkData,
@@ -29,6 +30,49 @@ logger = logging.getLogger(__name__)
 # Page marker: injected at content boundaries to track which page text belongs to.
 # Null byte (\x00) never appears in OCR output. Only used in memory, stripped before storage.
 PAGE_MARKER = "\x00"
+
+
+class _TableTextExtractor(HTMLParser):
+    """Strip HTML table tags and produce a pipe-delimited text representation."""
+    def __init__(self):
+        super().__init__()
+        self._in_cell = False
+        self._current_cell = ''
+        self._cells = []
+        self._rows = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ('td', 'th'):
+            self._in_cell = True
+            self._current_cell = ''
+        elif tag == 'tr':
+            self._cells = []
+
+    def handle_endtag(self, tag):
+        if tag in ('td', 'th'):
+            self._in_cell = False
+            self._cells.append(self._current_cell.strip())
+        elif tag == 'tr' and self._cells:
+            self._rows.append(self._cells)
+
+    def handle_data(self, data):
+        if self._in_cell:
+            self._current_cell += data
+
+    @property
+    def rows(self):
+        return self._rows
+
+
+def _convert_tables_to_text(content: str) -> str:
+    """Replace all <table>...</table> blocks with pipe-delimited plain text."""
+    def _replace_table(match):
+        html = match.group(0)
+        parser = _TableTextExtractor()
+        parser.feed(html)
+        return '\n'.join(' | '.join(row) for row in parser.rows)
+
+    return re.sub(r'<table[^>]*>.*?</table>', _replace_table, content, flags=re.DOTALL | re.IGNORECASE)
 
 
 class DocumentChunker:
@@ -235,7 +279,7 @@ Output JSON:"""
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.1,
-                max_tokens=1024,
+                max_tokens=4096,
             )
 
             # 提取 JSON
@@ -448,11 +492,12 @@ Output JSON:"""
         if tokens <= max_tokens:
             # 不需要切分 — 用 marker 算页码，去掉 marker 后存储
             p_start, p_end = self._extract_page_range(content)
+            clean = self._strip_markers(content)
             chunks.append({
                 "section_path": section_path,
                 "page_start": p_start or page_start,
                 "page_end": p_end or page_end,
-                "content": self._strip_markers(content),
+                "content": _convert_tables_to_text(clean),
                 "tokens": tokens,
                 "chunk_type": section_type
             })
@@ -474,7 +519,7 @@ Output JSON:"""
                         "section_path": section_path,
                         "page_start": min(pages) if pages else page_start,
                         "page_end": max(pages) if pages else page_end,
-                        "content": "\n\n".join(t for _, t in current_paras),
+                        "content": _convert_tables_to_text("\n\n".join(t for _, t in current_paras)),
                         "tokens": current_tokens,
                         "chunk_type": section_type
                     })
@@ -491,7 +536,7 @@ Output JSON:"""
                     "section_path": section_path,
                     "page_start": min(pages) if pages else page_start,
                     "page_end": max(pages) if pages else page_end,
-                    "content": "\n\n".join(t for _, t in current_paras),
+                    "content": _convert_tables_to_text("\n\n".join(t for _, t in current_paras)),
                     "tokens": current_tokens,
                     "chunk_type": section_type
                 })
@@ -722,8 +767,8 @@ Output JSON:"""
                 section_id=f"sec_{i:04d}",
                 section_title=section_title,
                 section_summary=None,
-                page_start=chunk.get("page_start", 1),
-                page_end=chunk.get("page_end", 1),
+                page_start=chunk.get("page_start") or 1,
+                page_end=chunk.get("page_end") or 1,
                 chunk_type=type_mapping.get(original_type, "text"),
                 content=content,
                 content_brief=content_brief,

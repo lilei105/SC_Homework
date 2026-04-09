@@ -157,18 +157,37 @@ async def chat_completion_async(
     )
 
 
-def rewrite_query(user_query: str) -> str:
-    """Rewrite user query for better retrieval."""
+def rewrite_query(user_query: str) -> List[str]:
+    """Rewrite user query into multiple retrieval-friendly queries.
+
+    Returns:
+        List of query strings (1 rewritten + 2 alternatives).
+        Falls back to [original_query] on any error.
+    """
     from app.core.prompts import QUERY_REWRITE_PROMPT
+    import json as _json
 
     prompt = QUERY_REWRITE_PROMPT.format(user_query=user_query)
-    response = chat_completion(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=256,
-    )
+    try:
+        response = chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=256,
+        )
+        # Strip markdown code block if present
+        text = response.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
 
-    return response.strip()
+        data = _json.loads(text)
+        queries = [data["rewritten"]] + data.get("alternatives", [])
+        if not queries:
+            return [user_query]
+        logger.info(f"[QueryRewrite] '{user_query}' → {queries}")
+        return queries
+    except Exception as e:
+        logger.warning(f"[QueryRewrite] Failed: {e}, using original query")
+        return [user_query]
 
 
 def generate_answer_stream(query: str, context: str):

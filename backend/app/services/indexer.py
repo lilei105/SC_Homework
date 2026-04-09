@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 import json
 import os
 import logging
+import torch
 
 logger = logging.getLogger(__name__)
 _settings = get_settings()
@@ -101,6 +102,10 @@ def index_document(document: DocumentSchema, status_callback=None) -> Dict[str, 
 
         if status_callback:
             status_callback(total=total_chunks, indexed=min(i + batch_size, total_chunks))
+
+    # Release encoding cache
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     # Convert to lists
     dense_vectors = [vec.tolist() if hasattr(vec, 'tolist') else vec for vec in all_dense_vecs]

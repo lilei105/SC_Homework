@@ -157,6 +157,26 @@ def get_chunk(document_id: str, chunk_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def count_document_chunks(document_id: str) -> int:
+    """Count total chunks for a document."""
+    client = get_qdrant_client()
+    try:
+        result = client.count(
+            collection_name=_settings.collection_name,
+            count_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="document_id",
+                        match=models.MatchValue(value=document_id)
+                    )
+                ]
+            )
+        )
+        return result.count
+    except Exception:
+        return 0
+
+
 def delete_document_chunks(document_id: str):
     """Delete all chunks for a document."""
     client = get_qdrant_client()

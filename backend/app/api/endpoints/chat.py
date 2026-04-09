@@ -5,6 +5,7 @@ from app.services.retriever import retrieve_chunks
 from app.services.reranker import two_stage_rerank
 from app.services.generator import generate_answer
 from app.api.endpoints.documents import _documents, _document_status
+from app.utils.qdrant_client import count_document_chunks
 import json
 import asyncio
 
@@ -31,14 +32,20 @@ async def chat_stream(
 
     async def event_generator():
         try:
-            # 1. Retrieve chunks (disable query rewrite to avoid rate limiting)
-            chunks = retrieve_chunks(document_id, query, use_rewrite=False)
+            # Dynamic retrieval/reranking params based on document size
+            total_chunks = count_document_chunks(document_id)
+            retrieve_limit = min(300, max(80, total_chunks // 5))
+            colbert_top_k = min(50, max(20, retrieve_limit // 3))
+            final_top_k = min(15, max(7, colbert_top_k // 3))
+
+            # 1. Retrieve chunks with query rewriting
+            chunks = retrieve_chunks(document_id, query, use_rewrite=True, limit=retrieve_limit)
             if not chunks:
                 yield json.dumps({"type": "error", "message": "No relevant content found"})
                 return
 
             # 2. Two-stage reranking on individual chunks
-            top_contexts = two_stage_rerank(query, chunks)
+            top_contexts = two_stage_rerank(query, chunks, colbert_top_k=colbert_top_k, final_top_k=final_top_k)
 
             if not top_contexts:
                 yield json.dumps({"type": "error", "message": "No relevant content after reranking"})

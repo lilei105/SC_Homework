@@ -1,22 +1,12 @@
-from FlagEmbedding import BGEM3FlagModel, FlagLLMReranker
+from FlagEmbedding import FlagLLMReranker
 from app.core.config import get_settings
+from app.services.indexer import get_embedding_model
 from typing import List, Dict, Any, Tuple
+import torch
 
 _settings = get_settings()
 
-_embedding_model: BGEM3FlagModel | None = None
 _reranker: FlagLLMReranker | None = None
-
-
-def get_embedding_model() -> BGEM3FlagModel:
-    global _embedding_model
-    if _embedding_model is None:
-        _embedding_model = BGEM3FlagModel(
-            _settings.embedding_model_name,
-            use_fp16=True,
-            device="cuda"
-        )
-    return _embedding_model
 
 
 def get_reranker() -> FlagLLMReranker:
@@ -70,6 +60,8 @@ def colbert_rerank(
     scores.sort(key=lambda x: x[1], reverse=True)
 
     # Return top_k
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     return [contexts[i] | {"colbert_score": score} for i, score in scores[:top_k]]
 
 
@@ -113,6 +105,8 @@ def cross_encoder_rerank(
     # Sort by score descending
     scored_contexts.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
 
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     return scored_contexts[:top_k]
 
 

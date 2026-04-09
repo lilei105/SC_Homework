@@ -28,54 +28,63 @@ def retrieve_chunks(
     limit: int = 80
 ) -> List[Dict[str, Any]]:
     """
-    Retrieve relevant chunks using hybrid search.
+    Retrieve relevant chunks using hybrid search with optional multi-query expansion.
 
     Args:
         document_id: The document to search in
         query: The user query
-        use_rewrite: Whether to rewrite the query first
-        limit: Maximum number of results
+        use_rewrite: Whether to rewrite the query first (generates multiple queries)
+        limit: Maximum number of results per query
 
     Returns:
-        List of retrieved chunks with scores
+        Deduplicated list of retrieved chunks with scores
     """
     model = get_embedding_model()
 
-    # Optionally rewrite query
+    # Optionally rewrite query into multiple queries
     if use_rewrite:
-        rewritten_query = rewrite_query(query)
+        queries = rewrite_query(query)
     else:
-        rewritten_query = query
+        queries = [query]
 
-    # Encode query
-    query_emb = model.encode(
-        [rewritten_query],
+    # Encode all queries
+    query_embs = model.encode(
+        queries,
         return_dense=True,
         return_sparse=True
     )
 
-    query_dense = query_emb['dense_vecs'][0].tolist()
-    query_sparse = query_emb['lexical_weights'][0]
+    # Retrieve for each query and merge by chunk_id (keep best score)
+    seen: Dict[str, Dict[str, Any]] = {}
 
-    # Hybrid search
-    results = hybrid_search(
-        query_dense=query_dense,
-        query_sparse=query_sparse,
-        document_id=document_id,
-        limit=limit
-    )
+    for i in range(len(queries)):
+        query_dense = query_embs['dense_vecs'][i].tolist()
+        query_sparse = query_embs['lexical_weights'][i]
 
-    return [
-        {
-            "chunk_id": point.payload.get("chunk_id"),
-            "score": point.score,
-            "page_start": point.payload.get("page_start"),
-            "page_end": point.payload.get("page_end"),
-            "content": point.payload.get("content"),
-            "section_title": point.payload.get("section_title"),
-        }
-        for point in results
-    ]
+        results = hybrid_search(
+            query_dense=query_dense,
+            query_sparse=query_sparse,
+            document_id=document_id,
+            limit=limit
+        )
+
+        for point in results:
+            cid = point.payload.get("chunk_id")
+            if cid and cid not in seen:
+                seen[cid] = {
+                    "chunk_id": cid,
+                    "score": point.score,
+                    "page_start": point.payload.get("page_start"),
+                    "page_end": point.payload.get("page_end"),
+                    "content": point.payload.get("content"),
+                    "section_title": point.payload.get("section_title"),
+                }
+            elif cid and point.score > seen[cid]["score"]:
+                seen[cid]["score"] = point.score
+
+    # Sort by score descending
+    chunks = sorted(seen.values(), key=lambda x: x["score"], reverse=True)
+    return chunks
 
 
 def bundle_chunks(chunks: List[Dict[str, Any]], max_gap: int = 1) -> List[Dict[str, Any]]:

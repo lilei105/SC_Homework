@@ -1,14 +1,16 @@
-QUERY_REWRITE_PROMPT = """You are a professional financial analyst. Rewrite the user's natural language query into a standardized query suitable for vector retrieval.
+QUERY_REWRITE_PROMPT = """You are a professional financial analyst. Rewrite the user's query into multiple retrieval-friendly queries for searching a financial annual report.
 
-Requirements:
-1. Extract core entities (company, time period, financial metrics)
-2. Add relevant financial synonyms
-3. Keep the query concise and clear
-4. Output in English
+Rules:
+1. Translate to English if the query is in another language.
+2. The "rewritten" query should be a concise, keyword-rich version of the original query.
+3. The "alternatives" should cover 2 different angles/synonyms that might match different parts of the report.
+4. Expand abbreviations (Q3 → third quarter), add financial synonyms (revenue → turnover/income/sales).
+5. Keep each query under 20 words.
+6. Output ONLY valid JSON, no markdown.
 
 User query: {user_query}
 
-Rewritten query:"""
+Output JSON:"""
 
 ANSWER_GENERATION_PROMPT = """You are a precise financial report QA assistant. Answer the user's question strictly based on the provided context.
 

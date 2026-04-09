@@ -292,6 +292,27 @@ def _extract_from_paddleocr_json(ocr_json: list) -> tuple[str, dict]:
     return "\n\n".join(markdown_parts), page_dict
 
 
+def _extract_from_baidu_pdf_json(ocr_json: dict) -> tuple[str, dict]:
+    """
+    从百度 PDF OCR JSON 中提取 markdown 和页面字典
+
+    百度 PDF OCR 返回格式: {"pages": [{"page_num": 0, "markdown": "...", "text": "..."}]}
+    """
+    markdown_parts = []
+    page_dict = {}
+
+    for page in ocr_json.get("pages", []):
+        page_num = page.get("page_num", 0) + 1  # 0-indexed → 1-indexed
+        # 优先用 markdown（有格式），回退到 text（纯文本）
+        page_markdown = page.get("markdown", "") or page.get("text", "")
+
+        if page_markdown.strip():
+            markdown_parts.append(f"<!-- PAGE: {page_num} -->\n{page_markdown.strip()}")
+            page_dict[page_num] = page_markdown.strip()
+
+    return "\n\n".join(markdown_parts), page_dict
+
+
 def _is_paddleocr_format(data: Any) -> bool:
     """检测是否为 PaddleOCR-VL 格式的 JSON"""
     if not isinstance(data, list):
@@ -427,6 +448,11 @@ async def process_pdf_document(document_id: str, file_path: Path):
         ocr_service = get_ocr_service()
 
         markdown_content, ocr_json_result = await ocr_service.process_pdf(file_path)
+
+        # 从 JSON 提取分页 markdown（比下载的无分页 markdown 质量更好）
+        if ocr_json_result and "pages" in ocr_json_result:
+            markdown_content, page_dict = _extract_from_baidu_pdf_json(ocr_json_result)
+            ocr_json_result = {"pages": [{"page_num": k - 1, "text": v} for k, v in page_dict.items()]}
 
         # Save OCR results
         ocr_md_path = task_dir / "ocr_result.md"
